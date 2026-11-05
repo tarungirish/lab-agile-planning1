@@ -301,7 +301,7 @@ def main():
     Cameras        : {'simulated, a photo every ' + str(a.camera_every) + ' s' if a.camera_every else 'off'}{' (counted by ' + ('Claude vision' if live else 'a simulated counter') + ')' if a.camera_every else ''}
 
   Demo data only. Ctrl+C to stop.
-""")
+""", flush=True)   # hosts capture stdout through a pipe; don't let the banner sit in a buffer
     if a.camera_every > 0:
         threading.Thread(target=_camera_loop, args=(store, a.port, a.camera_every), daemon=True).start()
     import uvicorn
