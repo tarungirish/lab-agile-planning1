@@ -21,6 +21,16 @@ Each account is identified by the driver's **mobile phone number** (one number, 
 7. **Shop.** They can buy items at the micro market with the card.
 8. **Leave.** They get a text with a link to their session page: the charging summary, the $3 access fee, their purchases, and their cards. A receipt is emailed too.
 
+## Messaging channel
+
+Driver messaging uses **business messaging**: Apple Messages for Business on iPhone and Google RCS Business Messaging on Android, with **SMS as a fallback** for phones or situations where they are not available. Throughout this document, "text" means a message sent over whichever of these channels the driver is on. The conversation, requests, and replies are the same on all of them, and buttons (e.g. "Update card", "View session") replace raw links where the channel supports them.
+
+Implications to design for:
+* **Identity.** Apple Messages for Business does not give Orchard the driver's phone number, only an opaque ID for the conversation. The driver must connect their conversation to their account once (for example by tapping a "Message Orchard" button at signup, which sends a one-time code that Orchard matches to the phone number verified at signup).
+* **Who speaks first.** Apple Messages for Business is driver-initiated, so Orchard can send alerts only after the driver has opened the conversation. Signup therefore includes opening the conversation. RCS Business Messaging allows Orchard to start conversations once the driver has opted in.
+* **Setup and approval.** Each channel needs a registered business, approval from the platform, and typically a messaging provider. SMS fallback still needs carrier registration (A2P 10DLC).
+* **Fallback.** If a driver has not connected a business messaging channel, or a message cannot be delivered, Orchard falls back to SMS.
+
 ## Text message format
 
 Each Orchard text to a driver ends with this account summary. The text after a session also includes the link to the session page.
@@ -43,6 +53,7 @@ In store total spend - $__
 * **Club fee:** every charging session automatically includes a flat club access fee of **$3**, for every driver including fleet. There is no opt-in text or prompt, so using the club is never a decision for the driver. The fee is shown prominently at signup and on every receipt. The fee is the only club charge: there are no day passes, memberships, or other access products. It exists to control the moment of charging and access to the lounge, and to bring drivers out of the car.
 * **No prepaid balance:** preloads, top-up links, and the balance ledger are removed from scope.
 * **Session page:** the page reached from the texted link is the account screen. Pages are per session and each link is a private, unguessable URL that can expire or be revoked.
+* **Channel:** business messaging (Apple Messages for Business, Google RCS Business Messaging) with SMS fallback. See "Messaging channel".
 * **Door:** an NFC reader at the club entrance reads the Orchard pass. The pass carries only an ID; the reader (or its controller) asks Orchard's backend whether that ID may enter, and unlocks the door on approval.
 
 ## Requirements for Electric Era
@@ -74,7 +85,10 @@ To confirm in the build agreement and spec:
 * Unplug reminder: percent threshold(s), and whether idle fees apply after charging completes.
 * Failed charges: retry schedule, and does the account get blocked from further sessions or the club until paid?
 * Is "year to date" the calendar year or a rolling 12 months?
-* Text opt-in/opt-out compliance (TCPA) and STOP handling.
+* Text opt-in/opt-out compliance (TCPA) and STOP handling, on every channel including business messaging.
+* Which messaging provider will connect Orchard to Apple Messages for Business, RCS Business Messaging, and SMS? Check what each platform currently requires (business verification, driver-initiated rules, message content limits).
+* How is the Apple conversation tied to the verified phone number, and what happens if a driver changes phones or numbers?
+* Which alerts are important enough to fall back to SMS if the rich channel fails (e.g. charging complete, failed card)?
 
 ---
 
@@ -90,6 +104,7 @@ To confirm in the build agreement and spec:
 * Web signup collects name, mobile number, email, and optional fleet code.
 * The phone number is the account identifier and must be unique. It is verified with a one-time text code.
 * Signup includes text-message consent.
+* After verifying the phone number, signup includes opening the Orchard conversation in Apple Messages (iPhone) or Google Messages/RCS (Android) so alerts can reach the driver. If the driver skips this, they receive SMS.
 * The signup page shows the $3 access fee prominently, before the driver links a card or agrees to the terms. The prototype is in `prototype/signup.html`.
 * Signup requires an explicit tick to agree to: texts, being charged to the saved card after each session, and the $3 access fee added to every session.
 
