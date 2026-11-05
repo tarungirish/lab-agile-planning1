@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orchard Log In</title>
+<!--
+  PROTOTYPE ONLY. Any phone number "logs in", any 6-digit code verifies, and the account
+  data below is made-up demo data. Real build: text-code login against the real account
+  (the phone number is the account), with real sessions, charges and purchases.
+-->
+<style>
+  :root {
+    --bg: #f6f7f4; --surface: #ffffff; --text: #1b2a1f; --muted: #5b6b5f;
+    --line: #dde3da; --brand: #2f6b3f; --brand-ink: #ffffff; --brand-soft: #e5f0e7;
+    --err: #b3261e; --focus: #1a73e8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121a14; --surface: #1b251e; --text: #e8efe9; --muted: #9fb0a3;
+      --line: #2c3a30; --brand: #6cc287; --brand-ink: #0d1a11; --brand-soft: #1f3326;
+      --err: #ff8a80; --focus: #8ab4f8;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 440px; margin: 0 auto; padding: 24px 16px 48px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; margin-bottom: 20px; }
+  .logo { width: 32px; height: 32px; border-radius: 50%; background: var(--brand); display: inline-block; }
+  h1 { font-size: 26px; line-height: 1.2; margin: 0 0 6px; }
+  h2 { font-size: 17px; margin: 24px 0 8px; }
+  p.lead { margin: 0 0 20px; color: var(--muted); }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  label { display: block; font-weight: 600; margin: 0 0 6px; }
+  .hint { font-weight: 400; color: var(--muted); font-size: 14px; }
+  input[type="tel"], input[type="text"] {
+    width: 100%; padding: 12px; font-size: 16px; color: var(--text); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px;
+  }
+  input:focus-visible, button:focus-visible, a:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  button {
+    width: 100%; margin-top: 18px; padding: 14px; font-size: 16px; font-weight: 700;
+    border: 0; border-radius: 10px; background: var(--brand); color: var(--brand-ink); cursor: pointer;
+  }
+  button.alt { background: transparent; color: var(--text); border: 1px solid var(--line); margin-top: 10px; font-weight: 600; }
+  .error { color: var(--err); font-size: 14px; margin: 6px 0 0; min-height: 1em; }
+  .code { letter-spacing: .5em; text-align: center; font-size: 22px; }
+  .fine { font-size: 13px; color: var(--muted); margin-top: 16px; }
+  .fine a, .link { color: var(--brand); font-weight: 600; }
+  [hidden] { display: none !important; }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .stat b { display: block; font-size: 22px; line-height: 1.2; }
+  .stat span { color: var(--muted); font-size: 13px; }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .row + .row { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
+  .row small { color: var(--muted); display: block; }
+  .tag { background: var(--brand-soft); border-radius: 999px; padding: 2px 10px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .activity { list-style: none; margin: 0; padding: 0; }
+  .activity li { padding: 12px 0; border-top: 1px solid var(--line); }
+  .activity li:first-child { border-top: 0; padding-top: 0; }
+  .activity .top { display: flex; justify-content: space-between; gap: 12px; font-weight: 600; }
+  .activity .lines { color: var(--muted); font-size: 14px; margin: 4px 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand"><span class="logo" aria-hidden="true"></span> Orchard</div>
+
+  <!-- Step 1: phone -->
+  <section id="step1" aria-labelledby="h1">
+    <h1 id="h1">Log in</h1>
+    <p class="lead">Enter your mobile number and we'll text you a code. No password needed.</p>
+    <form class="card" id="form1" novalidate>
+      <label for="phone">Mobile number</label>
+      <input id="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="(555) 555-0123">
+      <p class="error" id="err1" role="alert"></p>
+      <button type="submit">Send code</button>
+    </form>
+    <p class="fine">New to Orchard? <a href="signup.html">Sign up</a></p>
+  </section>
+
+  <!-- Step 2: code -->
+  <section id="step2" hidden aria-labelledby="h2a">
+    <h1 id="h2a">Check your texts</h1>
+    <p class="lead">We sent a 6-digit code to <strong id="sentTo"></strong>.</p>
+    <form class="card" id="form2" novalidate>
+      <label for="code">Verification code</label>
+      <input id="code" class="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000">
+      <p class="error" id="err2" role="alert"></p>
+      <button type="submit">Log in</button>
+      <button type="button" class="alt" id="resend">Send a new code</button>
+      <button type="button" class="alt" id="back2">Change number</button>
+    </form>
+    <p class="fine" id="resent" role="status"></p>
+    <p class="fine">Prototype: any 6 digits will work.</p>
+  </section>
+
+  <!-- Step 3: account -->
+  <section id="step3" hidden aria-labelledby="h3">
+    <h1 id="h3">Hi, Sam</h1>
+    <p class="lead" id="acct"></p>
+
+    <div class="stats" aria-label="Your totals">
+      <div class="stat"><b>$17.65</b><span>Today's spend</span></div>
+      <div class="stat"><b>$62.75</b><span>In store total spend</span></div>
+      <div class="stat" style="grid-column: 1 / -1"><b>412.6 kWh</b><span>Year to date kWh usage</span></div>
+    </div>
+
+    <h2>Your Orchard card</h2>
+    <div class="card">
+      <div class="row"><div>Apple Wallet<small>Tap to charge and enter the club</small></div><span class="tag">Added</span></div>
+      <button type="button" class="alt" id="textlink" style="margin-top:12px">Text me a link to add it again</button>
+      <p class="fine" id="linksent" role="status"></p>
+    </div>
+
+    <h2>Payment card</h2>
+    <div class="card">
+      <div class="row"><div>Visa &middot;&middot;&middot;&middot; 4242<small>Charged after each session</small></div><span class="tag">Default</span></div>
+      <button type="button" class="alt" id="textcard" style="margin-top:12px">Text me a link to update my card</button>
+      <p class="fine" id="cardsent" role="status"></p>
+    </div>
+
+    <h2>Recent activity</h2>
+    <div class="card">
+      <ul class="activity">
+        <li>
+          <div class="top"><span>Charging session &middot; Today</span><span>$11.40</span></div>
+          <p class="lines">38.2 kWh &middot; $8.40 charging + $3.00 club access fee</p>
+        </li>
+        <li>
+          <div class="top"><span>Micro market &middot; Today</span><span>$6.25</span></div>
+          <p class="lines">Water, Protein bar</p>
+        </li>
+        <li>
+          <div class="top"><span>Charging session &middot; Oct 28</span><span>$17.10</span></div>
+          <p class="lines">61.0 kWh &middot; $14.10 charging + $3.00 club access fee</p>
+        </li>
+      </ul>
+    </div>
+
+    <button type="button" class="alt" id="logout">Log out</button>
+    <p class="fine">Reply STOP to any Orchard text to stop messages. Receipts are emailed after each session.</p>
+  </section>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  function show(n) {
+    for (let i = 1; i <= 3; i++) $('step' + i).hidden = i !== n;
+    const h = $('step' + n).querySelector('h1');
+    h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: true });
+    window.scrollTo({ top: 0 });
+  }
+
+  $('phone').addEventListener('input', (e) => {
+    const d = e.target.value.replace(/\D/g, '').replace(/^1/, '').slice(0, 10);
+    const a = d.slice(0, 3), b = d.slice(3, 6), c = d.slice(6);
+    e.target.value = d.length > 6 ? `(${a}) ${b}-${c}` : d.length > 3 ? `(${a}) ${b}` : d.length ? `(${a}` : '';
+  });
+
+  $('form1').addEventListener('submit', (e) => {
+    e.preventDefault();
+    if ($('phone').value.replace(/\D/g, '').length !== 10) { $('err1').textContent = 'Enter a valid 10-digit mobile number.'; return; }
+    $('err1').textContent = '';
+    $('sentTo').textContent = $('phone').value;
+    $('resent').textContent = '';
+    show(2);
+    $('code').focus();
+  });
+
+  $('form2').addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!/^\d{6}$/.test($('code').value)) { $('err2').textContent = 'Enter the 6-digit code.'; return; }
+    $('err2').textContent = '';
+    $('acct').textContent = 'Account ' + $('phone').value;
+    show(3);
+  });
+
+  $('resend').addEventListener('click', () => { $('resent').textContent = 'A new code is on its way.'; });
+  $('back2').addEventListener('click', () => show(1));
+  $('textlink').addEventListener('click', () => { $('linksent').textContent = 'We texted you a link.'; });
+  $('textcard').addEventListener('click', () => { $('cardsent').textContent = 'We texted you a secure link to update your card.'; });
+  $('logout').addEventListener('click', () => { $('phone').value = ''; $('code').value = ''; show(1); });
+</script>
+</body>
+</html>

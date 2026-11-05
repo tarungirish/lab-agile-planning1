@@ -140,7 +140,7 @@ Then the Orchard card appears in my wallet
 * At signup the driver authorizes Apple Pay or Google Pay on the web page and agrees to be charged after sessions and purchases.
 * Stripe saves the card for later charges made without the driver present.
 * The driver can replace the card by text link; the dashboard can also send that link.
-* A linked card is required before a tap can start a session (story 4). The link can be completed before or after the Orchard card is added to the wallet.
+* A linked card is required before a tap can start a session (story 5). The link can be completed before or after the Orchard card is added to the wallet.
 
 #### Acceptance Criteria
 
@@ -154,7 +154,41 @@ When I tap my card at a charger
 Then the session does not start and I receive a text with a link to link a card
 ```
 
-### 4. Tap to start charging
+### 4. Log in to my account
+
+**As a** driver
+**I need** to log in with my phone number and a text code
+**So that** I can see my account and fix problems without a password or an app
+
+#### Details and Assumptions
+* Passwordless: the phone number is the account, and a one-time 6-digit text code proves it.
+* After login the driver sees: Today's spend, In store total spend, Year to date kWh usage, whether the Orchard card is in the wallet, the saved payment card (brand and last four digits), and recent activity (charging sessions with the charging amount and the $3 club access fee itemized, and micro market purchases).
+* Drivers can ask for a text with a link to add the Orchard card again or to update the payment card. The page never takes card details directly; Stripe does.
+* Unknown phone numbers are pointed to signup without revealing whether an account exists (to prevent number guessing).
+* Codes expire quickly, are single-use, and are rate-limited per number.
+* Prototype: `prototype/login.html`.
+
+#### Acceptance Criteria
+
+```gherkin
+Given I have an Orchard account
+When I enter my phone number and the correct code from the text
+Then I am logged in and see my account summary and recent activity
+
+Given I enter a wrong or expired code
+When I submit it
+Then I am not logged in and I can request a new code
+
+Given I request codes many times in a short period
+When I exceed the limit
+Then no further codes are sent for a while
+
+Given I am logged in
+When I choose "Text me a link to update my card"
+Then I receive a text with a secure Stripe link and no card details are entered on the Orchard page
+```
+
+### 5. Tap to start charging
 
 **As a** driver
 **I need** to tap my Orchard card on the charger
@@ -178,7 +212,7 @@ When I tap my card at a charger
 Then the session does not start and I receive a text with a link to update my card
 ```
 
-### 5. Enter the club with the Orchard card
+### 6. Enter the club with the Orchard card
 
 **As a** driver
 **I need** to tap my Orchard card at the club door
@@ -202,7 +236,7 @@ When I tap my Orchard card at the club door
 Then entry is denied and the tap is logged
 ```
 
-### 6. Unplug reminder at 80%
+### 7. Unplug reminder at 80%
 
 **As a** driver
 **I need** a text when my car reaches 80%
@@ -230,7 +264,7 @@ When charging continues
 Then the session is unchanged
 ```
 
-### 7. Charging complete notification
+### 8. Charging complete notification
 
 **As a** driver
 **I need** a text when my car has finished charging
@@ -244,7 +278,7 @@ When the system receives session_completed
 Then I receive a text telling me charging is complete, with the account summary
 ```
 
-### 8. Charge my card after the session
+### 9. Charge my card after the session
 
 **As a** driver
 **I need** my card charged only after my charging session ends
@@ -273,14 +307,14 @@ When the system processes the result
 Then the failure is flagged in the dashboard and I receive a text with a link to update my card
 ```
 
-### 9. Buy at the micro market
+### 10. Buy at the micro market
 
 **As a** driver
 **I need** to pay at the micro market with my Orchard card
 **So that** I can buy items without cash or another card
 
 #### Details and Assumptions
-* Paid with the saved card, like story 8. Whether purchases are charged one by one or combined is an open question.
+* Paid with the saved card, like story 9. Whether purchases are charged one by one or combined is an open question.
 * The way the driver pays at the market (tap at a register or kiosk) depends on the point-of-sale system chosen.
 * Each purchase is recorded against the account and counts toward In store total spend.
 * Not limited to when a charging session is active.
@@ -297,7 +331,7 @@ When I tap my Orchard card to pay
 Then the purchase is declined and I receive a text with a link to update my card
 ```
 
-### 10. Charging summary and purchase receipts
+### 11. Charging summary and purchase receipts
 
 **As a** driver
 **I need** a summary of my charge and a receipt for my purchases
@@ -320,7 +354,7 @@ When the purchase completes
 Then I receive an itemized receipt by email and a text with the total
 ```
 
-### 11. Account summary in texts
+### 12. Account summary in texts
 
 **As a** driver
 **I need** to see today's spend, what I bought, and my year-to-date totals in each text
@@ -348,7 +382,7 @@ When I receive a text
 Then Today's spend, kWh usage and in-store spend show zero, and Purchased shows "Nothing yet", not blank
 ```
 
-### 12. Manage accounts in the internal dashboard
+### 13. Manage accounts in the internal dashboard
 
 **As an** Orchard staff member
 **I need** a dashboard to view and manage driver accounts, sessions and purchases
@@ -373,7 +407,7 @@ When I open the dashboard
 Then the account and session are flagged with the amount owed
 ```
 
-### 13. Text opt-out
+### 14. Text opt-out
 
 **As a** driver
 **I need** to be able to stop text messages
