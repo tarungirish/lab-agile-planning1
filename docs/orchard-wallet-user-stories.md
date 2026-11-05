@@ -28,12 +28,14 @@ Each account is identified by the driver's **mobile phone number** (one number, 
 Each Orchard text to a driver ends with this account summary:
 
 ```
-Current Balance - $__
+Today's spend - $__
+Purchased - __
 Year to date kWh usage - __ kWh
 In store total spend - $__
 ```
 
-* **Current Balance:** **needs a decision.** With no prepaid balance this line has no meaning. Options: drop it, or replace it with something such as "Charged today" or "Last charge".
+* **Today's spend:** everything charged to the driver's card today (charging, club fee if any, and micro market purchases), in the account's time zone.
+* **Purchased:** the micro market items bought today, e.g. "Water, Protein bar". Shows "Nothing yet" if none. A long list is shortened ("Water, Protein bar +3 more") and the full list is in the emailed receipt.
 * **Year to date kWh usage:** the sum of energy delivered from completed sessions since January 1. Requires kWh from Electric Era's `session_completed` event.
 * **In store total spend:** total spent at the club and micro market since January 1. Requires purchases to be recorded against the account.
 
@@ -67,7 +69,6 @@ To confirm in the build agreement and spec:
 * Micro market: how does the driver pay (tap the card on a register or kiosk)? Which point-of-sale system records purchases against the account?
 * Micro market charges are small, and card processing fees have a fixed per-charge part. Combine purchases from one visit into one charge, or charge each purchase?
 * Apple Pay / Google Pay default card: confirm with Stripe how a card from the wallet is saved for later charges without the driver present. A wallet card is chosen by the driver at signup; Orchard cannot read the wallet's cards afterwards.
-* Which text line replaces "Current Balance"?
 * Does club access last for the whole visit or end when the charging session ends?
 * Unplug reminder: percent threshold(s), and whether idle fees apply after charging completes.
 * Failed charges: retry schedule, and does the account get blocked from further sessions or the club until paid?
@@ -355,12 +356,13 @@ Then I receive an itemized receipt by email and a text with the total
 ### 13. Account summary in texts
 
 **As a** driver
-**I need** to see my year-to-date charging and in-store spend in each text
+**I need** to see today's spend, what I bought, and my year-to-date totals in each text
 **So that** I always know where my account stands
 
 #### Details and Assumptions
 * Format is defined in "Text message format". Values: $ with two decimals, kWh with one.
 * Values reflect the state after the event that triggered the text.
+* A text sent before the card is charged (e.g. the 80% reminder) shows spend so far today, not including the session in progress.
 * Summary lines are appended after the main message.
 
 #### Acceptance Criteria
@@ -368,11 +370,15 @@ Then I receive an itemized receipt by email and a text with the total
 ```gherkin
 Given I am a driver with an active account
 When I receive a text from Orchard
-Then it ends with my Year to date kWh usage and In store total spend (and the line replacing Current Balance, once decided)
+Then it ends with Today's spend, Purchased, Year to date kWh usage, and In store total spend
 
-Given I have had no sessions or purchases this year
+Given I bought two items at the micro market today
 When I receive a text
-Then kWh usage and in-store spend show zero, not blank
+Then Purchased lists those items and Today's spend includes their cost
+
+Given I have had no sessions or purchases
+When I receive a text
+Then Today's spend, kWh usage and in-store spend show zero, and Purchased shows "Nothing yet", not blank
 ```
 
 ### 14. Manage accounts in the internal dashboard
