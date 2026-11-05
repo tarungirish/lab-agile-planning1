@@ -141,7 +141,7 @@ Then the Orchard card appears in my wallet
 * At signup the driver authorizes Apple Pay or Google Pay on the web page and agrees to be charged after sessions and purchases.
 * Stripe saves the card for later charges made without the driver present.
 * The driver can replace the card by text link; the dashboard can also send that link.
-* A linked card is required before a tap can start a session (story 5). The link can be completed before or after the Orchard card is added to the wallet.
+* A linked card is required before a tap can start a session (story 6). The link can be completed before or after the Orchard card is added to the wallet.
 
 #### Acceptance Criteria
 
@@ -167,8 +167,8 @@ Then the session does not start and I receive a text with a link to link a card
 * The link is the credential. It is a long random token, tied to one account, with no guessable or sequential parts.
 * The page shows only what a receipt needs: first name, last four digits of the card, and the phone number masked. No full card numbers or email address.
 * Actions that change something (add the Orchard card again, update the payment card) send a new text with a secure link. Card details are entered on a Stripe page, never on the Orchard page.
-* Links expire after a set period (to decide, e.g. 90 days) and can be revoked in the dashboard. Pages must not be indexed by search engines.
-* If the link is lost or expired, the driver texts LINK to Orchard, or uses the login page (code by text), to get a new one.
+* Links can be short-lived (to decide, e.g. 30 days) because history is always available by text (story 5). Links can be revoked in the dashboard. Pages must not be indexed by search engines.
+* If a link has expired, the driver texts Orchard (story 5) or uses the login page (code by text) to get a fresh one.
 * Unknown phone numbers on the login page are pointed to signup without revealing whether an account exists. Codes expire quickly, are single-use, and are rate-limited per number.
 * Prototypes: `prototype/session.html` (the session page) and `prototype/login.html` (get-a-link fallback).
 
@@ -185,18 +185,61 @@ Then I see the session itemized with the $3 club access fee, my totals, and my c
 
 Given the link has expired or has been revoked
 When I open it
-Then I see a message that it is no longer valid and how to get a new one by texting LINK
+Then I see a message that it is no longer valid and how to get a new one by texting Orchard
 
 Given I choose "Text me a link to update my card"
 When the text arrives
 Then it contains a secure Stripe link and no card details are entered on the Orchard page
-
-Given I text LINK to Orchard from my verified number
-When the system receives it
-Then I receive a text with a fresh link to my latest session page
 ```
 
-### 5. Tap to start charging
+### 5. Ask Orchard by text
+
+**As a** driver
+**I need** to text Orchard's number and ask for my history and totals
+**So that** I can get my information any time, without an app, a login, or a link that has not expired
+
+#### Details and Assumptions
+* The driver texts the same Orchard number that sends their notifications. The sender's phone number identifies the account.
+* Supported requests (read-only), in the driver's own words, e.g.:
+  * "charging history" / "history": the last 3 sessions (date, kWh, total) plus a link to the full history page
+  * "total spend" / "how much have I spent": spend this month and year to date, and in store total spend
+  * "kWh" / "usage": year to date kWh usage
+  * "last receipt": the last session's total with its itemized lines and a link to its page
+  * "link": a fresh link to the latest session page
+  * "update card": a secure Stripe link to change the payment card
+  * "help": the list of things they can ask
+* Matching: simple keywords handle the common requests. An AI model may be used to interpret free-form wording, but only to choose one of the fixed requests above. It never reads or writes payments or accounts directly, never invents numbers, and every number in a reply comes from Orchard's records.
+* Replies are short, end with the account summary lines, and give a link for anything longer.
+* Anything that changes money or account details (update card, refunds, changing the number) is never done by text alone. It sends a secure link, or is handled by staff.
+* Unrecognized messages get a short help message. A request that needs a human ("dispute a charge") is passed to staff in the dashboard, and the driver is told someone will reply.
+* STOP, HELP, and START keep working as carrier rules require.
+* The sender number is the only proof of identity. Because phone numbers can be spoofed or taken over (SIM swap), replies contain no full card numbers or other sensitive details, and rate limits apply per number.
+
+#### Acceptance Criteria
+
+```gherkin
+Given I am a driver with at least one completed session
+When I text "charging history" to Orchard's number
+Then I receive my last 3 sessions with date, kWh, and total, and a link to my full history
+
+Given I text "how much have I spent"
+When the system receives it
+Then I receive my spend this month and year to date, and my in store total spend
+
+Given I text something Orchard does not understand
+When the system replies
+Then I receive a short list of what I can ask for
+
+Given I text "update card"
+When the system replies
+Then I receive a secure Stripe link and no card details are exchanged by text
+
+Given a text comes from a number that has no Orchard account
+When the system replies
+Then it points them to signup and shares no account information
+```
+
+### 6. Tap to start charging
 
 **As a** driver
 **I need** to tap my Orchard card on the charger
@@ -220,7 +263,7 @@ When I tap my card at a charger
 Then the session does not start and I receive a text with a link to update my card
 ```
 
-### 6. Enter the club with the Orchard card
+### 7. Enter the club with the Orchard card
 
 **As a** driver
 **I need** to tap my Orchard card at the club door
@@ -244,7 +287,7 @@ When I tap my Orchard card at the club door
 Then entry is denied and the tap is logged
 ```
 
-### 7. Unplug reminder at 80%
+### 8. Unplug reminder at 80%
 
 **As a** driver
 **I need** a text when my car reaches 80%
@@ -272,7 +315,7 @@ When charging continues
 Then the session is unchanged
 ```
 
-### 8. Charging complete notification
+### 9. Charging complete notification
 
 **As a** driver
 **I need** a text when my car has finished charging
@@ -286,7 +329,7 @@ When the system receives session_completed
 Then I receive a text telling me charging is complete, with the account summary
 ```
 
-### 9. Charge my card after the session
+### 10. Charge my card after the session
 
 **As a** driver
 **I need** my card charged only after my charging session ends
@@ -315,14 +358,14 @@ When the system processes the result
 Then the failure is flagged in the dashboard and I receive a text with a link to update my card
 ```
 
-### 10. Buy at the micro market
+### 11. Buy at the micro market
 
 **As a** driver
 **I need** to pay at the micro market with my Orchard card
 **So that** I can buy items without cash or another card
 
 #### Details and Assumptions
-* Paid with the saved card, like story 9. Whether purchases are charged one by one or combined is an open question.
+* Paid with the saved card, like story 10. Whether purchases are charged one by one or combined is an open question.
 * The way the driver pays at the market (tap at a register or kiosk) depends on the point-of-sale system chosen.
 * Each purchase is recorded against the account and counts toward In store total spend.
 * Not limited to when a charging session is active.
@@ -339,7 +382,7 @@ When I tap my Orchard card to pay
 Then the purchase is declined and I receive a text with a link to update my card
 ```
 
-### 11. Session text and receipts
+### 12. Session text and receipts
 
 **As a** driver
 **I need** a text with my session page link and an emailed receipt
@@ -363,7 +406,7 @@ When the purchase completes
 Then I receive an itemized receipt by email and a text with the total
 ```
 
-### 12. Account summary in texts
+### 13. Account summary in texts
 
 **As a** driver
 **I need** to see today's spend, what I bought, and my year-to-date totals in each text
@@ -391,7 +434,7 @@ When I receive a text
 Then Today's spend, kWh usage and in-store spend show zero, and Purchased shows "Nothing yet", not blank
 ```
 
-### 13. Manage accounts in the internal dashboard
+### 14. Manage accounts in the internal dashboard
 
 **As an** Orchard staff member
 **I need** a dashboard to view and manage driver accounts, sessions and purchases
@@ -416,7 +459,7 @@ When I open the dashboard
 Then the account and session are flagged with the amount owed
 ```
 
-### 14. Text opt-out
+### 15. Text opt-out
 
 **As a** driver
 **I need** to be able to stop text messages
