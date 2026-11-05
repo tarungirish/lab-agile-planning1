@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your Orchard Session</title>
+<!--
+  PROTOTYPE ONLY. This is the page created after every charging session. Orchard texts the
+  driver a private link to it, so there is no app and no login. All data below is made-up demo data.
+  Real build: one page per session, reached by a long random link (the link is the credential).
+-->
+<style>
+  :root {
+    --bg: #f6f7f4; --surface: #ffffff; --text: #1b2a1f; --muted: #5b6b5f;
+    --line: #dde3da; --brand: #2f6b3f; --brand-ink: #ffffff; --brand-soft: #e5f0e7;
+    --err: #b3261e; --focus: #1a73e8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121a14; --surface: #1b251e; --text: #e8efe9; --muted: #9fb0a3;
+      --line: #2c3a30; --brand: #6cc287; --brand-ink: #0d1a11; --brand-soft: #1f3326;
+      --err: #ff8a80; --focus: #8ab4f8;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 440px; margin: 0 auto; padding: 24px 16px 48px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; margin-bottom: 20px; }
+  .logo { width: 32px; height: 32px; border-radius: 50%; background: var(--brand); display: inline-block; }
+  h1 { font-size: 26px; line-height: 1.2; margin: 0 0 6px; }
+  h2 { font-size: 17px; margin: 24px 0 8px; }
+  p.lead { margin: 0 0 20px; color: var(--muted); }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  label { display: block; font-weight: 600; margin: 0 0 6px; }
+  .hint { font-weight: 400; color: var(--muted); font-size: 14px; }
+  input[type="tel"], input[type="text"] {
+    width: 100%; padding: 12px; font-size: 16px; color: var(--text); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px;
+  }
+  input:focus-visible, button:focus-visible, a:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  button {
+    width: 100%; margin-top: 18px; padding: 14px; font-size: 16px; font-weight: 700;
+    border: 0; border-radius: 10px; background: var(--brand); color: var(--brand-ink); cursor: pointer;
+  }
+  button.alt { background: transparent; color: var(--text); border: 1px solid var(--line); margin-top: 10px; font-weight: 600; }
+  .error { color: var(--err); font-size: 14px; margin: 6px 0 0; min-height: 1em; }
+  .code { letter-spacing: .5em; text-align: center; font-size: 22px; }
+  .fine { font-size: 13px; color: var(--muted); margin-top: 16px; }
+  .fine a, .link { color: var(--brand); font-weight: 600; }
+  [hidden] { display: none !important; }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .stat b { display: block; font-size: 22px; line-height: 1.2; }
+  .stat span { color: var(--muted); font-size: 13px; }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .row + .row { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
+  .row small { color: var(--muted); display: block; }
+  .tag { background: var(--brand-soft); border-radius: 999px; padding: 2px 10px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .activity { list-style: none; margin: 0; padding: 0; }
+  .activity li { padding: 12px 0; border-top: 1px solid var(--line); }
+  .activity li:first-child { border-top: 0; padding-top: 0; }
+  .activity .top { display: flex; justify-content: space-between; gap: 12px; font-weight: 600; }
+  .activity .lines { color: var(--muted); font-size: 14px; margin: 4px 0 0; }
+
+  .done { background: var(--brand-soft); border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; display: flex; gap: 12px; align-items: center; }
+  .done .tick { width: 28px; height: 28px; border-radius: 50%; background: var(--brand); color: var(--brand-ink); display: grid; place-items: center; font-weight: 800; flex: none; }
+  .total { font-weight: 800; font-size: 18px; }
+  .receipt { list-style: none; margin: 0; padding: 0; font-size: 15px; }
+  .receipt li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .receipt li:last-child { border-bottom: 0; }
+  .meta { color: var(--muted); font-size: 14px; margin: 0 0 10px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand"><span class="logo" aria-hidden="true"></span> Orchard</div>
+
+  <div class="done" role="status"><span class="tick" aria-hidden="true">&#10003;</span><div><strong>Charging complete</strong><br><span class="meta" style="margin:0">Charger 4 &middot; Today, 2:14 pm &middot; 52 min</span></div></div>
+
+  <h1>Your session, Sam</h1>
+  <p class="lead">Here's what you used and what was charged to your card.</p>
+
+  <div class="card">
+    <ul class="receipt" aria-label="Charging summary">
+      <li><span>Energy delivered</span><span>38.2 kWh</span></li>
+      <li><span>Charging</span><span>$8.40</span></li>
+      <li><span>Club access fee</span><span>$3.00</span></li>
+      <li class="total"><span>Total</span><span>$11.40</span></li>
+    </ul>
+    <p class="meta" style="margin:10px 0 0">Charged to Visa &middot;&middot;&middot;&middot; 4242</p>
+  </div>
+
+  <h2>Purchases today</h2>
+  <div class="card">
+    <ul class="receipt" aria-label="Micro market purchases">
+      <li><span>Water</span><span>$2.25</span></li>
+      <li><span>Protein bar</span><span>$4.00</span></li>
+      <li class="total"><span>Total</span><span>$6.25</span></li>
+    </ul>
+  </div>
+
+  <h2>Your totals</h2>
+  <div class="stats" aria-label="Your totals">
+    <div class="stat"><b>$17.65</b><span>Today's spend</span></div>
+    <div class="stat"><b>$62.75</b><span>In store total spend</span></div>
+    <div class="stat" style="grid-column: 1 / -1"><b>412.6 kWh</b><span>Year to date kWh usage</span></div>
+  </div>
+
+  <h2>Your Orchard card</h2>
+  <div class="card">
+    <div class="row"><div>Apple Wallet<small>Tap to charge and enter the club</small></div><span class="tag">Added</span></div>
+    <button type="button" class="alt" id="textlink" style="margin-top:12px">Text me a link to add it again</button>
+    <p class="fine" id="linksent" role="status"></p>
+  </div>
+
+  <h2>Payment card</h2>
+  <div class="card">
+    <div class="row"><div>Visa &middot;&middot;&middot;&middot; 4242<small>Charged after each session</small></div><span class="tag">Default</span></div>
+    <button type="button" class="alt" id="textcard" style="margin-top:12px">Text me a link to update my card</button>
+    <p class="fine" id="cardsent" role="status"></p>
+  </div>
+
+  <h2>Earlier sessions</h2>
+  <div class="card">
+    <ul class="activity">
+      <li><div class="top"><span>Oct 28</span><span>$17.10</span></div><p class="lines">61.0 kWh &middot; $14.10 charging + $3.00 club access fee</p></li>
+      <li><div class="top"><span>Oct 14</span><span>$9.30</span></div><p class="lines">21.5 kWh &middot; $6.30 charging + $3.00 club access fee</p></li>
+    </ul>
+  </div>
+
+  <p class="fine">This private page was texted to (&bull;&bull;&bull;) &bull;&bull;&bull;-0123 and a receipt was emailed to you. Please don't share the link. Need a new one later? Text <strong>LINK</strong> to this number. Reply STOP to stop messages.</p>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  $('textlink').addEventListener('click', () => { $('linksent').textContent = 'We texted you a link.'; });
+  $('textcard').addEventListener('click', () => { $('cardsent').textContent = 'We texted you a secure link to update your card.'; });
+</script>
+</body>
+</html>

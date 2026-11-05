@@ -2,7 +2,7 @@
 
 ## Product summary
 
-Drivers add an **Orchard card** to Apple Wallet or Google Wallet. There is no mobile app. Tapping the card at an Electric Era charger starts a charging session. A **club access fee is automatically added to every charging session**, so every driver can use the club without any extra decision. The card also opens the club door and pays at the micro market. All driver communication is by **text** (and email for receipts).
+Drivers add an **Orchard card** to Apple Wallet or Google Wallet. There is no mobile app. Tapping the card at an Electric Era charger starts a charging session. A **club access fee is automatically added to every charging session**, so every driver can use the club without any extra decision. The card also opens the club door and pays at the micro market. All driver communication is by **text** (and email for receipts). After every charging session Orchard creates a private web page for that session and texts the driver its link. That page is the driver's account screen, so no app and no login are needed.
 
 The Orchard card is tied to the **default payment card in the driver's mobile wallet** (Apple Pay / Google Pay), chosen at signup and saved with Stripe. Charges are made to that card **after** the charging session completes. There is no prepaid balance.
 
@@ -19,11 +19,11 @@ Each account is identified by the driver's **mobile phone number** (one number, 
 5. **Wait in the club.** They tap the card at the club door to enter and wait while the car charges. No offer or reply needed.
 6. **Stay informed.** They get a text when the car is done, or an "80% charged, would you like to unplug now?" reminder.
 7. **Shop.** They can buy items at the micro market with the card.
-8. **Leave.** They get a charging summary and a receipt for micro market purchases.
+8. **Leave.** They get a text with a link to their session page: the charging summary, the $3 access fee, their purchases, and their cards. A receipt is emailed too.
 
 ## Text message format
 
-Each Orchard text to a driver ends with this account summary:
+Each Orchard text to a driver ends with this account summary. The text after a session also includes the link to the session page.
 
 ```
 Today's spend - $__
@@ -42,6 +42,7 @@ In store total spend - $__
 * **Payments:** Stripe. The Orchard card is tied to the driver's default wallet card (Apple Pay / Google Pay), saved at signup for later charges made without the driver present. The charge happens only after the session completes.
 * **Club fee:** every charging session automatically includes a flat club access fee of **$3**, for every driver including fleet. There is no opt-in text or prompt, so using the club is never a decision for the driver. The fee is shown prominently at signup and on every receipt. The fee is the only club charge: there are no day passes, memberships, or other access products. It exists to control the moment of charging and access to the lounge, and to bring drivers out of the car.
 * **No prepaid balance:** preloads, top-up links, and the balance ledger are removed from scope.
+* **Session page:** the page reached from the texted link is the account screen. Pages are per session and each link is a private, unguessable URL that can expire or be revoked.
 * **Door:** an NFC reader at the club entrance reads the Orchard pass. The pass carries only an ID; the reader (or its controller) asks Orchard's backend whether that ID may enter, and unlocks the door on approval.
 
 ## Requirements for Electric Era
@@ -154,38 +155,45 @@ When I tap my card at a charger
 Then the session does not start and I receive a text with a link to link a card
 ```
 
-### 4. Log in to my account
+### 4. Open my session page from a texted link
 
 **As a** driver
-**I need** to log in with my phone number and a text code
-**So that** I can see my account and fix problems without a password or an app
+**I need** a page created after every charging session, with a link texted to me
+**So that** I can see what I used, what I was charged, and manage my cards without an app or a password
 
 #### Details and Assumptions
-* Passwordless: the phone number is the account, and a one-time 6-digit text code proves it.
-* After login the driver sees: Today's spend, In store total spend, Year to date kWh usage, whether the Orchard card is in the wallet, the saved payment card (brand and last four digits), and recent activity (charging sessions with the charging amount and the $3 club access fee itemized, and micro market purchases).
-* Drivers can ask for a text with a link to add the Orchard card again or to update the payment card. The page never takes card details directly; Stripe does.
-* Unknown phone numbers are pointed to signup without revealing whether an account exists (to prevent number guessing).
-* Codes expire quickly, are single-use, and are rate-limited per number.
-* Prototype: `prototype/login.html`.
+* After each session completes, Orchard creates a page for that session and texts the driver its URL. This page is the account screen: there is no app.
+* The page shows: this session (charger, time, duration, kWh delivered, charging amount, club access fee, total, and the card charged by brand and last four digits), micro market purchases today, Today's spend, In store total spend, Year to date kWh usage, whether the Orchard card is in the wallet, the saved payment card, and earlier sessions.
+* The link is the credential. It is a long random token, tied to one account, with no guessable or sequential parts.
+* The page shows only what a receipt needs: first name, last four digits of the card, and the phone number masked. No full card numbers or email address.
+* Actions that change something (add the Orchard card again, update the payment card) send a new text with a secure link. Card details are entered on a Stripe page, never on the Orchard page.
+* Links expire after a set period (to decide, e.g. 90 days) and can be revoked in the dashboard. Pages must not be indexed by search engines.
+* If the link is lost or expired, the driver texts LINK to Orchard, or uses the login page (code by text), to get a new one.
+* Unknown phone numbers on the login page are pointed to signup without revealing whether an account exists. Codes expire quickly, are single-use, and are rate-limited per number.
+* Prototypes: `prototype/session.html` (the session page) and `prototype/login.html` (get-a-link fallback).
 
 #### Acceptance Criteria
 
 ```gherkin
-Given I have an Orchard account
-When I enter my phone number and the correct code from the text
-Then I am logged in and see my account summary and recent activity
+Given my charging session has completed and my card has been charged
+When the system finalizes the session
+Then a page is created for the session and I receive a text with its link
 
-Given I enter a wrong or expired code
-When I submit it
-Then I am not logged in and I can request a new code
+Given I open the link on my phone
+When the page loads
+Then I see the session itemized with the $3 club access fee, my totals, and my cards, without logging in
 
-Given I request codes many times in a short period
-When I exceed the limit
-Then no further codes are sent for a while
+Given the link has expired or has been revoked
+When I open it
+Then I see a message that it is no longer valid and how to get a new one by texting LINK
 
-Given I am logged in
-When I choose "Text me a link to update my card"
-Then I receive a text with a secure Stripe link and no card details are entered on the Orchard page
+Given I choose "Text me a link to update my card"
+When the text arrives
+Then it contains a secure Stripe link and no card details are entered on the Orchard page
+
+Given I text LINK to Orchard from my verified number
+When the system receives it
+Then I receive a text with a fresh link to my latest session page
 ```
 
 ### 5. Tap to start charging
@@ -331,23 +339,24 @@ When I tap my Orchard card to pay
 Then the purchase is declined and I receive a text with a link to update my card
 ```
 
-### 11. Charging summary and purchase receipts
+### 11. Session text and receipts
 
 **As a** driver
-**I need** a summary of my charge and a receipt for my purchases
+**I need** a text with my session page link and an emailed receipt
 **So that** I know what I used and was charged
 
 #### Details and Assumptions
-* Charging summary after the session: duration, kWh delivered, charging amount, club access fee, total, and the card charged (last four digits).
-* Purchase receipt for micro market items: itemized, sent by email, with a text showing the total.
-* The charging summary and purchase receipt are separate messages.
+* The session page (story 4) is the charging summary: duration, kWh delivered, charging amount, club access fee, total, and the card charged (last four digits).
+* The text after the session is short: it says charging is complete, gives the link, and ends with the account summary.
+* An itemized receipt is also emailed. Micro market purchases get their own receipt (email, plus the text with the total) and also appear on the session page.
+* The session page and the receipt are generated after the card is charged, so the amounts are final. If the charge fails, the page says so and offers a link to update the card.
 
 #### Acceptance Criteria
 
 ```gherkin
 Given my card has been charged for my session
 When the session is finalized
-Then I receive a text with the total charged, and an email with the itemized charging summary
+Then I receive a text with the total charged and a link to my session page, and an email with the itemized receipt
 
 Given I bought items at the micro market
 When the purchase completes
