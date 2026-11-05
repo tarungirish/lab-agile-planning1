@@ -23,6 +23,12 @@ Each account is identified by the driver's **mobile phone number** (one number, 
 6. Payment method on file is charged for charging plus the club fee, if accepted.
 7. Driver receives a text and email receipt.
 
+## Decisions
+
+* **Payments:** Stripe. The payment method is saved at signup (Stripe SetupIntent) for off-session use, and charged after the session completes.
+* **Club access:** The driver uses the same Orchard digital card (wallet pass) to enter the club. Access is granted for the visit once they accept the offer.
+* **Offer expiry:** The club offer is valid only while the charging session is in progress. When the session completes, the offer expires and a late YES is rejected.
+
 ## Requirements for Electric Era
 
 To confirm in the build agreement and spec:
@@ -38,11 +44,9 @@ To confirm in the build agreement and spec:
 
 ## Open questions
 
-* Payments provider (e.g. Stripe) and how a payment method is captured at pass issuance.
-* How the club verifies access at the door (QR on pass, staff lookup, etc.).
 * How fleet status is determined (fleet code, fleet account) and who is billed for the fleet fee.
-* Behavior if the driver replies YES after the session has ended, or never replies.
-* Does the club offer expire after a time window, and is the fee per visit or per session?
+* What does the club door reader accept from the Orchard pass (NFC tap, QR/barcode), and how does it check that club access is active for the visit?
+* What happens if the session ends with the charge failing (retry schedule, club access revoked)?
 * Text opt-in/opt-out compliance (TCPA) and STOP handling.
 
 ---
@@ -122,8 +126,10 @@ Then the price shown is $3
 
 #### Details and Assumptions
 * No reply is treated as a decline.
+* The offer is valid only during the charging session. A YES after `session_completed` gets a reply that the offer has expired, and no fee is added.
 * Replies are case-insensitive; unrecognized replies get a help message.
 * No charge is made at the time of reply.
+* Accepting marks the Orchard card as club-eligible for this visit.
 
 #### Acceptance Criteria
 
@@ -144,7 +150,8 @@ Then no club fee is added to my session
 **So that** I pay for what I actually used
 
 #### Details and Assumptions
-* Charge uses the payment method tied to the wallet account.
+* Charge uses the Stripe payment method saved on the account, as an off-session payment.
+* Use an idempotency key per session so a repeated event never double-charges.
 * Total = charging cost + club fee (if accepted).
 * Failed payments are flagged on the dashboard for follow-up.
 
@@ -174,7 +181,29 @@ When the session is finalized
 Then I receive a text with the total and an email with an itemized receipt
 ```
 
-### 7. Manage accounts in the internal dashboard
+### 7. Enter the club with the Orchard card
+
+**As a** driver who accepted the club offer
+**I need** to use my Orchard digital card to enter the club
+**So that** I do not need a separate ticket or code
+
+#### Details and Assumptions
+* Access is tied to an accepted offer for an active session.
+* Decision pending on whether access is also granted after the session ends (e.g. for the rest of the visit).
+
+#### Acceptance Criteria
+
+```gherkin
+Given I accepted the club offer during my charging session
+When I present my Orchard card at the club entrance
+Then I am granted entry
+
+Given I did not accept the club offer
+When I present my Orchard card at the club entrance
+Then entry is denied
+```
+
+### 8. Manage accounts in the internal dashboard
 
 **As an** Orchard staff member
 **I need** a dashboard to view and manage driver accounts and sessions
@@ -198,7 +227,7 @@ When I open the dashboard
 Then the failed payment is visible with the account and session details
 ```
 
-### 8. Text opt-out
+### 9. Text opt-out
 
 **As a** driver
 **I need** to be able to stop text messages
