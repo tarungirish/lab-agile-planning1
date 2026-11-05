@@ -79,6 +79,14 @@ CREATE TABLE IF NOT EXISTS charging_sessions (
 -- At most one active session per charger, enforced by the database.
 CREATE UNIQUE INDEX IF NOT EXISTS one_active_session
   ON charging_sessions(charger_id) WHERE status='active';
+CREATE TABLE IF NOT EXISTS reorder_rules (
+  product_id INTEGER PRIMARY KEY REFERENCES products(id),
+  par_level INTEGER NOT NULL CHECK (par_level > 0),   -- stock level to order back up to
+  pack_size INTEGER NOT NULL DEFAULT 1 CHECK (pack_size > 0),
+  lead_time_days REAL NOT NULL DEFAULT 2 CHECK (lead_time_days >= 0),
+  supplier TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1
+);
 -- Audit trail of everything the agent (or staff) changed.
 CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY,

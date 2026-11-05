@@ -12,6 +12,7 @@ import os
 
 import anthropic
 
+from .autoorder import AutoOrder
 from .charging import Charging
 from .store import Store, StoreError
 
@@ -67,6 +68,17 @@ _TOOLS = {
         "input_schema": {"type": "object", "properties": {"cents_per_kwh": {"type": "integer"}},
                          "required": ["cents_per_kwh"], "additionalProperties": False},
     },
+    "auto_order_plan": {
+        "description": "What the auto-ordering system would order right now and why, plus reorder rules (par level, pack size, lead time). Read-only.",
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    "set_reorder_rule": {
+        "description": "Tune auto-ordering for a SKU: par level (stock to order back up to), pack size, lead time in days. Par can at most double per change; new rules are capped at par 100.",
+        "input_schema": {"type": "object", "properties": {
+            "sku": {"type": "string"}, "par_level": {"type": "integer"},
+            "pack_size": {"type": "integer"}, "lead_time_days": {"type": "number"}},
+            "required": ["sku", "par_level"], "additionalProperties": False},
+    },
     "add_note": {
         "description": "Save a note to your persistent scratchpad (decisions, observations, to-dos).",
         "input_schema": {
@@ -86,6 +98,7 @@ class Shopkeeper:
     def __init__(self, store: Store, client: anthropic.Anthropic | None = None, model: str = MODEL):
         self.store = store
         self.charging = Charging(store)
+        self.autoorder = AutoOrder(store)
         self._client = client
         self.model = model
 
@@ -115,6 +128,17 @@ class Shopkeeper:
         if name == "set_charging_price":
             return json.dumps({"price_cents_per_kwh":
                                self.charging.set_price(args["cents_per_kwh"], actor="agent")})
+        if name == "auto_order_plan":
+            return json.dumps({"plan": self.autoorder.plan(), "rules": self.autoorder.list_rules()})
+        if name == "set_reorder_rule":
+            old = {}
+            try:
+                old = self.autoorder.get_rule(args["sku"])
+            except StoreError:
+                pass
+            return json.dumps(self.autoorder.set_rule(
+                args["sku"], args["par_level"], args.get("pack_size", old.get("pack_size", 1)),
+                args.get("lead_time_days", old.get("lead_time_days", 2)), old.get("supplier"), actor="agent"))
         if name == "add_note":
             return json.dumps({"note_id": s.add_note(args["body"])})
         if name == "read_notes":

@@ -88,6 +88,14 @@ th{color:var(--mute);font-weight:500;font-size:14px}
         <p class="msg" style="margin-top:16px">By location</p><table id="cloc"></table>
         <p class="msg" style="margin-top:16px">Daily kWh</p><div class="bars" id="cday"></div></div>
       <div class="card"><h3>Charging sessions</h3><table id="csess"></table></div></div>
+    <div id="p-auto" class="hide">
+      <div class="card" style="margin-bottom:16px"><h3>Auto-ordering</h3>
+        <div class="row" style="justify-content:flex-start;flex-wrap:wrap" id="amode"></div>
+        <p class="msg" id="amodehelp"></p></div>
+      <div class="card" style="margin-bottom:16px"><div class="row"><h3 style="margin:0">Order plan</h3>
+        <button class="p" id="aorder" onclick="runAuto()">Order all</button></div>
+        <p class="msg" id="atotal"></p><table id="aplan"></table></div>
+      <div class="card"><h3>Reorder rules</h3><table id="arules"></table></div></div>
     <div id="p-log" class="hide"><div class="card"><h3>Audit log</h3><table id="audit"></table></div></div>
   </div>
 </section></main>
@@ -97,7 +105,7 @@ th{color:var(--mute);font-weight:500;font-size:14px}
 const $=id=>document.getElementById(id),money=c=>'$'+(c/100).toFixed(2);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let products=[],cart={},token='',tabNow='over',mres;
-const TABS=[['over','Overview'],['inv','Inventory'],['sales','Sales'],['chg','Charging'],['log','Log']];
+const TABS=[['over','Overview'],['inv','Inventory'],['sales','Sales'],['chg','Charging'],['auto','Auto-order'],['log','Log']];
 function mode(m){for(const x of['shop','admin']){$(x).classList.toggle('hide',x!==m);$('t'+x[0]).classList.toggle('on',x===m)}if(m==='shop'){loadProducts();loadChargers()}}
 function tab(t){tabNow=t;for(const[k]of TABS)$('p-'+k).classList.toggle('hide',k!==t);drawTabs()}
 function drawTabs(){$('tabs').innerHTML=TABS.map(([k,l])=>`<button class="${k===tabNow?'on':''}" onclick="tab('${k}')">${l}</button>`).join('')}
@@ -133,7 +141,7 @@ async function startCharge(id){const m=$('cmsg2');let n=$('who').value.trim();
   catch(e){m.className='msg err';m.textContent=e.message}loadChargers()}
 /* ---- owner ---- */
 async function loadAdmin(){token=$('tok').value;
-  try{const [s,inv,rs,sales,audit,ct,cs]=await Promise.all(['summary','products','restocks','sales','audit','charging/trends?days='+$('cdays').value,'charging/sessions'].map(p=>api('/api/admin/'+p)));
+  try{const [s,inv,rs,sales,audit,ct,cs,ao]=await Promise.all(['summary','products','restocks','sales','audit','charging/trends?days='+$('cdays').value,'charging/sessions','autoorder'].map(p=>api('/api/admin/'+p)));
    $('login').classList.add('hide');$('dash').classList.remove('hide');tab(tabNow);
    const card=(k,v)=>`<div class="card"><span class="msg">${k}</span><b>${v}</b></div>`;
    $('stats').innerHTML=[['Cash',money(s.cash_cents)],['Revenue',money(s.revenue_cents)],['Gross profit',money(s.gross_profit_cents)],['Sales',s.sales_count],['Low stock',s.low_stock.length]].map(x=>card(...x)).join('');
@@ -158,6 +166,17 @@ async function loadAdmin(){token=$('tok').value;
    $('csess').innerHTML='<tr><th>#</th><th>Charger</th><th>Driver</th><th>Started</th><th>kWh</th><th>Cost</th><th></th></tr>'+cs.map(x=>
      `<tr><td>${x.id}</td><td>${esc(x.charger)}</td><td>${esc(x.customer)}</td><td>${esc(x.started_at.slice(5,16))}</td><td>${x.kwh??'–'}</td><td>${x.cost_cents==null?'–':money(x.cost_cents)}</td>
       <td>${x.status==='active'?`<button class="sm" onclick="stopCharge(${x.id})">Stop…</button>`:''}</td></tr>`).join('');
+   const HELP={off:'Nothing is ordered automatically and no suggestions are shown as actions.',suggest:'The plan below is a suggestion. You approve it with “Order all”.',auto:'Orders in the plan are placed automatically every hour, within spend caps and the cash reserve.'};
+   $('amode').innerHTML=['off','suggest','auto'].map(m=>`<button class="${ao.mode===m?'on':''}" onclick="setMode('${m}')">${m[0].toUpperCase()+m.slice(1)}</button>`).join('');
+   $('amodehelp').textContent=HELP[ao.mode];
+   const pl=ao.plan,ords=pl.lines.filter(l=>l.status==='order');$('aorder').disabled=!ords.length||ao.mode==='off';
+   $('atotal').textContent=ords.length?`${ords.length} item(s), ${money(pl.total_cost_cents)} total. Cash left above reserve after ordering: ${money(Math.max(pl.budget_after_cents,0))}.`:'Nothing needs ordering right now.';
+   $('aplan').innerHTML=pl.lines.length?'<tr><th>Item</th><th>Stock</th><th>On order</th><th>Sells/day</th><th>Days left</th><th>Order</th><th>Cost</th></tr>'+pl.lines.map(l=>
+     `<tr><td>${esc(l.name)}<br><span class="msg">${esc(l.reason)}</span></td><td>${l.stock}</td><td>${l.on_order}</td><td>${l.velocity_per_day}</td><td>${l.days_of_cover??'–'}</td>
+      <td><b>${l.status==='order'?l.qty:'–'}</b></td><td>${l.status==='order'?money(l.cost_cents):''}</td></tr>`).join(''):'';
+   $('arules').innerHTML='<tr><th>Item</th><th>Par</th><th>Pack</th><th>Lead time</th><th>Supplier</th><th></th></tr>'+ao.rules.map(r=>
+     `<tr><td>${esc(r.name)}</td><td>${r.par_level}</td><td>${r.pack_size}</td><td>${r.lead_time_days} d</td><td>${esc(r.supplier||'–')}</td>
+      <td><button class="sm" onclick="editRule('${esc(r.sku)}',${r.par_level},${r.pack_size},${r.lead_time_days})">Edit</button></td></tr>`).join('');
    $('audit').innerHTML='<tr><th>When</th><th>Actor</th><th>Action</th><th>Detail</th></tr>'+audit.map(a=>
      `<tr><td>${esc(a.ts.slice(5,16))}</td><td>${esc(a.actor)}</td><td>${esc(a.action)}</td><td>${esc((a.detail||'').slice(0,100))}</td></tr>`).join('')}
   catch(e){$('lerr').textContent=e.message}}
@@ -167,6 +186,10 @@ async function refund(id){const v=await prompt2('Refund sale #'+id+'?','Type YES
   if(v&&v.trim().toUpperCase()==='YES')act(()=>post(`/api/admin/sales/${id}/refund`))}
 async function stopCharge(id){const k=await prompt2('Stop session #'+id,'kWh delivered (from the charger display)','number');
   if(k!==null&&k!=='')act(()=>post(`/api/admin/charging/sessions/${id}/stop`,{kwh:parseFloat(k)}))}
+const setMode=m=>act(()=>api('/api/admin/autoorder/mode',{method:'PUT',body:JSON.stringify({mode:m})}));
+async function runAuto(){try{const r=await post('/api/admin/autoorder/run');if(r.errors.length)await prompt2('Some orders were refused','','text',r.errors.map(e=>e.sku+': '+e.error).join('\n'),true)}catch(e){await prompt2('Could not order','','text',e.message,true)}loadAdmin()}
+async function editRule(sku,par,pack,lead){const v=await prompt2('Par level for '+sku+' (currently '+par+', pack of '+pack+')','Order back up to this many','number');
+  if(v)act(()=>api('/api/admin/autoorder/rules/'+sku,{method:'PUT',body:JSON.stringify({par_level:parseInt(v),pack_size:pack,lead_time_days:lead})}))}
 async function runAgent(){$('arun').disabled=true;$('amsg').textContent='Agent is working…';
   try{const r=await post('/api/admin/agent/run',{task:$('task').value||null});$('areport').textContent=r.report;$('amsg').textContent=''}
   catch(e){$('amsg').textContent=e.message}$('arun').disabled=false;loadAdmin()}

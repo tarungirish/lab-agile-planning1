@@ -1,6 +1,8 @@
 """FastAPI app: kiosk (public) + admin (token-protected when ADMIN_TOKEN is set)."""
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import os
 from pathlib import Path
 
@@ -74,15 +76,46 @@ class ChargePriceIn(BaseModel):
     cents_per_kwh: int
 
 
+class ModeIn(BaseModel):
+    mode: str
+
+
+class RuleIn(BaseModel):
+    par_level: int = Field(gt=0)
+    pack_size: int = Field(1, gt=0)
+    lead_time_days: float = Field(2, ge=0)
+    supplier: str | None = None
+    enabled: bool = True
+
+
 class TaskIn(BaseModel):
     task: str | None = Field(None, max_length=2000)
 
 
-def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None) -> FastAPI:
+def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
+               auto_order_interval_s: float | None = None) -> FastAPI:
     store = store or Store(connect())
     agent = shopkeeper or Shopkeeper(store)
     charging = agent.charging
-    app = FastAPI(title="Micromarket POS")
+    auto = agent.autoorder
+    if auto_order_interval_s is None:
+        auto_order_interval_s = float(os.environ.get("AUTO_ORDER_INTERVAL_MIN", "60")) * 60
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_):
+        async def loop():
+            while True:
+                await asyncio.sleep(auto_order_interval_s)
+                try:  # only acts when mode == 'auto'; never let a failure kill the loop
+                    auto.run_if_auto()
+                except Exception:
+                    pass
+        task = asyncio.create_task(loop()) if auto_order_interval_s > 0 else None
+        yield
+        if task:
+            task.cancel()
+
+    app = FastAPI(title="Micromarket POS", lifespan=lifespan)
 
     def admin(x_admin_token: str | None = Header(None)):
         expected = os.environ.get("ADMIN_TOKEN")
@@ -206,6 +239,23 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None)
     @app.get("/api/admin/charging/trends", dependencies=[Depends(admin)])
     def charge_trends(days: int = 30):
         return charging.trends(max(1, min(days, 365)))
+
+    @app.get("/api/admin/autoorder", dependencies=[Depends(admin)])
+    def autoorder_state():
+        return {"mode": auto.mode(), "plan": auto.plan(), "rules": auto.list_rules(),
+                "products": [{"sku": p["sku"], "name": p["name"]} for p in store.list_products()]}
+
+    @app.put("/api/admin/autoorder/mode", dependencies=[Depends(admin)])
+    def autoorder_mode(body: ModeIn):
+        return {"mode": auto.set_mode(body.mode)}
+
+    @app.put("/api/admin/autoorder/rules/{sku}", dependencies=[Depends(admin)])
+    def autoorder_rule(sku: str, body: RuleIn):
+        return auto.set_rule(sku, **body.model_dump())
+
+    @app.post("/api/admin/autoorder/run", dependencies=[Depends(admin)])
+    def autoorder_run():
+        return auto.run(actor="staff-approved")
 
     @app.get("/api/admin/notes", dependencies=[Depends(admin)])
     def notes():

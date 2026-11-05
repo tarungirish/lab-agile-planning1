@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 
@@ -26,18 +27,20 @@ class Policy:
 class Store:
     def __init__(self, conn: sqlite3.Connection, policy: Policy | None = None):
         self.db = conn
+        self._lock = threading.RLock()  # one connection is shared by request threads + scheduler
         self.policy = policy or Policy()
 
     # ---- helpers -------------------------------------------------------
     @contextmanager
     def _tx(self):
-        self.db.execute("BEGIN IMMEDIATE")
-        try:
-            yield
-            self.db.execute("COMMIT")
-        except BaseException:
-            self.db.execute("ROLLBACK")
-            raise
+        with self._lock:
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                yield
+                self.db.execute("COMMIT")
+            except BaseException:
+                self.db.execute("ROLLBACK")
+                raise
 
     def _audit(self, actor: str, action: str, detail: str = ""):
         self.db.execute("INSERT INTO audit(actor, action, detail) VALUES (?,?,?)",
