@@ -67,7 +67,7 @@ _TOOLS = {
             "required": ["sku", "price_cents"], "additionalProperties": False},
     },
     "order_restock": {
-        "description": "Order more stock for a SKU at its current cost. Subject to a per-order spend cap and cash reserve.",
+        "description": "Order more stock for a SKU at its current cost. Subject to the owner's per-order and daily spending limits and cash reserve (shown in auto_order_plan; you can't change them).",
         "input_schema": {
             "type": "object",
             "properties": {"sku": {"type": "string"}, "qty": {"type": "integer"}},
@@ -91,7 +91,7 @@ _TOOLS = {
         "input_schema": _EMPTY,
     },
     "run_auto_order_plan": {
-        "description": "Carry out the auto-order plan as the owner's mode allows. Off: refused. Suggest: creates the stockroom-to-shelf pick list only; purchases are returned as awaiting the owner's approval. Auto: pick list and vendor purchases (within the per-order cap and cash reserve).",
+        "description": "Carry out the auto-order plan as the owner's mode allows. Off: refused. Suggest: creates the stockroom-to-shelf pick list only; purchases are returned as awaiting the owner's approval. Auto: pick list and vendor purchases (within the owner's per-order and daily spending limits and cash reserve).",
         "input_schema": _EMPTY,
     },
     "set_reorder_rule": {

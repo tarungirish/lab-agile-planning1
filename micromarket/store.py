@@ -19,8 +19,21 @@ class Policy:
     """
     min_margin: float = 0.10          # price must be >= cost * (1 + min_margin)
     max_price_change: float = 0.50    # single change limited to +/-50%
-    max_restock_spend_cents: int = 10_000  # per order
-    min_cash_reserve_cents: int = 2_000    # never spend cash below this
+
+
+# Spending limits for automatic, plan-driven and shopkeeper purchase orders. The owner's own manual
+# orders aren't limited. Stored in `settings` so the owner can change them from the dashboard;
+# these are the defaults, sized for bulk buying.
+SPENDING_DEFAULTS = {
+    "per_order_cents": 50_000,      # one purchase order (one product line): $500
+    "daily_cents": 150_000,         # all automatic/shopkeeper orders in one day (UTC): $1,500
+    "cash_reserve_cents": 20_000,   # automatic orders never spend cash below this: $200
+}
+MAX_LIMIT_CENTS = 10_000_000        # sanity bound on any limit: $100,000
+
+
+def usd(cents: int) -> str:
+    return f"${cents / 100:,.2f}"
 
 
 class Store:
@@ -173,6 +186,41 @@ class Store:
             "SELECT COALESCE(SUM(qty*unit_cost_cents),0) FROM restocks WHERE status='pending'"
         ).fetchone()[0]
 
+    # ---- spending limits -------------------------------------------------
+    def spending_limits(self) -> dict:
+        out = {}
+        for k, default in SPENDING_DEFAULTS.items():
+            r = self.db.execute("SELECT value FROM settings WHERE key=?", ("spend_" + k,)).fetchone()
+            out[k] = int(r["value"]) if r else default
+        return out
+
+    def set_spending_limits(self, per_order_cents: int | None = None, daily_cents: int | None = None,
+                            cash_reserve_cents: int | None = None, actor: str = "staff") -> dict:
+        if actor != "staff":
+            raise StoreError("Only the owner can change spending limits")
+        old = self.spending_limits()
+        new = {**old, **{k: v for k, v in {"per_order_cents": per_order_cents, "daily_cents": daily_cents,
+                                             "cash_reserve_cents": cash_reserve_cents}.items() if v is not None}}
+        if new["per_order_cents"] <= 0 or new["daily_cents"] <= 0 or new["cash_reserve_cents"] < 0:
+            raise StoreError("Limits must be positive (the cash reserve may be zero)")
+        if max(new.values()) > MAX_LIMIT_CENTS:
+            raise StoreError(f"Limits can't exceed {usd(MAX_LIMIT_CENTS)}")
+        if new["per_order_cents"] > new["daily_cents"]:
+            raise StoreError("The per-order limit can't be higher than the daily limit")
+        with self._tx():
+            for k, v in new.items():
+                self.db.execute("INSERT INTO settings(key,value) VALUES (?,?)"
+                                " ON CONFLICT(key) DO UPDATE SET value=excluded.value", ("spend_" + k, str(v)))
+            self._audit(actor, "spending_limits", ", ".join(
+                f"{k.replace('_cents', '')}: {usd(old[k])} -> {usd(new[k])}" for k in new if new[k] != old[k]) or "unchanged")
+        return new
+
+    def spent_today_cents(self) -> int:
+        """Purchase orders placed today (UTC) by anything other than the owner's own manual orders."""
+        return self.db.execute(
+            "SELECT COALESCE(SUM(qty*unit_cost_cents),0) FROM restocks"
+            " WHERE ordered_by!='staff' AND status!='cancelled' AND date(ts)=date('now')").fetchone()[0]
+
     def order_restock(self, sku: str, qty: int, unit_cost_cents: int | None = None,
                       actor: str = "staff") -> dict:
         p = self._product(sku)
@@ -180,17 +228,21 @@ class Store:
             raise StoreError("Quantity must be positive")
         unit = p["cost_cents"] if unit_cost_cents is None else unit_cost_cents
         cost = unit * qty
-        if actor != "staff":
-            if cost > self.policy.max_restock_spend_cents:
-                raise StoreError(f"Refused: order of {cost}c exceeds the "
-                                 f"{self.policy.max_restock_spend_cents}c per-order limit")
-            available = self.cash_cents() - self._pending_commitments() - cost
-            if available < self.policy.min_cash_reserve_cents:
-                raise StoreError("Refused: order would drop cash below the reserve")
-        with self._tx():
+        with self._tx():   # check and insert under one lock, so two orders can't both squeeze under a limit
+            if actor != "staff":
+                lim = self.spending_limits()
+                if cost > lim["per_order_cents"]:
+                    raise StoreError(f"Refused: order of {usd(cost)} exceeds the {usd(lim['per_order_cents'])} per-order limit")
+                spent = self.spent_today_cents()
+                if spent + cost > lim["daily_cents"]:
+                    raise StoreError(f"Refused: order of {usd(cost)} would exceed today's {usd(lim['daily_cents'])} "
+                                     f"limit for automatic orders ({usd(spent)} already ordered)")
+                available = self.cash_cents() - self._pending_commitments() - cost
+                if available < lim["cash_reserve_cents"]:
+                    raise StoreError(f"Refused: order would drop cash below the {usd(lim['cash_reserve_cents'])} reserve")
             rid = self.db.execute(
-                "INSERT INTO restocks(product_id,qty,unit_cost_cents) VALUES (?,?,?)",
-                (p["id"], qty, unit)).lastrowid
+                "INSERT INTO restocks(product_id,qty,unit_cost_cents,ordered_by) VALUES (?,?,?,?)",
+                (p["id"], qty, unit, actor)).lastrowid
             self._audit(actor, "order_restock", f"#{rid} {sku} x{qty} @ {unit}c")
         return dict(self.db.execute("SELECT * FROM restocks WHERE id=?", (rid,)).fetchone())
 

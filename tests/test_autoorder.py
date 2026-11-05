@@ -66,7 +66,8 @@ def test_pending_orders_count_toward_projected_stock():
 
 
 def test_trimmed_to_available_cash_above_reserve():
-    a = make(cash=4_000, stock=2)          # budget = 4000 - 2000 reserve = 2000 -> 25 units -> 24
+    a = make(cash=4_000, stock=2)
+    a.store.set_spending_limits(cash_reserve_cents=2_000)   # budget = 4000 - 2000 = 2000 -> 25 units -> 24
     l = lines(a.plan(NOW))["COKE"]
     assert l["qty"] == 24 and "cash" in l["reason"]
 
@@ -77,8 +78,9 @@ def test_trimmed_to_per_order_cap():
     s.add_product("TV", "Tablet", 900, 400, stock=0)
     a = AutoOrder(s)
     a.set_rule("TV", par_level=100)
+    s.set_spending_limits(per_order_cents=10_000)
     l = lines(a.plan(NOW))["TV"]
-    assert l["qty"] == 25 and l["cost_cents"] == 10_000   # cap $100 / $4
+    assert l["qty"] == 25 and l["cost_cents"] == 10_000 and "per-order" in l["reason"]   # $100 / $4
 
 
 def test_scarce_cash_goes_to_most_urgent_item():
@@ -87,6 +89,7 @@ def test_scarce_cash_goes_to_most_urgent_item():
     s.add_product("CHIPS", "Chips", 175, 100, stock=3, reorder_point=3)
     a.set_rule("CHIPS", par_level=12, pack_size=12)
     sell(s, "COKE", 28)                    # 2/day; leaves 2 in stock => 1 day of cover
+    s.set_spending_limits(cash_reserve_cents=2_000)
     set_cash(s, 2_000 + 12 * 80)           # exactly one pack of cola above the reserve
     p = lines(a.plan(NOW))
     assert p["COKE"]["status"] == "order"

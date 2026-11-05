@@ -171,6 +171,12 @@ class AssetIn(BaseModel):
     notes: str | None = Field(None, max_length=300)
 
 
+class SpendingIn(BaseModel):
+    per_order_cents: int | None = Field(None, gt=0)
+    daily_cents: int | None = Field(None, gt=0)
+    cash_reserve_cents: int | None = Field(None, ge=0)
+
+
 class TaskIn(BaseModel):
     task: str | None = Field(None, max_length=2000)
 
@@ -500,6 +506,10 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
     def autoorder_state():
         return {"mode": auto.mode(), "plan": auto.plan(), "rules": auto.list_rules(),
                 "products": [{"sku": p["sku"], "name": p["name"]} for p in store.list_products()]}
+
+    @app.put("/api/admin/spending-limits", dependencies=[Depends(admin)])
+    def spending_limits(body: SpendingIn):
+        return store.set_spending_limits(**body.model_dump())
 
     @app.put("/api/admin/autoorder/mode", dependencies=[Depends(admin)])
     def autoorder_mode(body: ModeIn):

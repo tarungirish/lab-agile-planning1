@@ -2,7 +2,8 @@
 
 plan()  - pure read: what should be ordered right now, and why (or why not).
 run()   - places the plan's orders as pending restocks (actor 'auto', so the Policy
-          spend cap and cash reserve are enforced by the Store, not just by the planner).
+          per-order and daily spending limits and the cash reserve are enforced by the Store, not
+          just by the planner).
 
 Modes (stored in settings): off | suggest | auto. The background scheduler only acts in 'auto'.
 """
@@ -111,9 +112,12 @@ class AutoOrder:
 
     def plan(self, now: str | None = None) -> dict:
         t = datetime.strptime(now, FMT) if now else datetime.now(timezone.utc).replace(tzinfo=None)
-        pol = self.store.policy
-        budget = (self.store.cash_cents() - self.store._pending_commitments()
-                  - pol.min_cash_reserve_cents)
+        lim = self.store.spending_limits()
+        spent_today = self.store.spent_today_cents()
+        cash_budget = self.store.cash_cents() - self.store._pending_commitments() - lim["cash_reserve_cents"]
+        daily_left = lim["daily_cents"] - spent_today
+        budget = min(cash_budget, daily_left)
+        budget_note = "trimmed to today's spending limit" if daily_left < cash_budget else "trimmed to available cash"
         cands = []
         for r in self.db.execute(
                 "SELECT r.*, p.sku, p.name, p.stock, p.cost_cents, p.reorder_point, p.active,"
@@ -154,16 +158,17 @@ class AutoOrder:
             if qty:
                 note = []
                 if unit > 0:
-                    cap = pol.max_restock_spend_cents // unit // pack * pack
+                    cap = lim["per_order_cents"] // unit // pack * pack
                     if qty > cap:
                         qty = cap
-                        note.append("trimmed to per-order cap")
+                        note.append("trimmed to the per-order limit")
                     afford = max(budget, 0) // unit // pack * pack
                     if qty > afford:
                         qty = afford
-                        note.append("trimmed to available cash")
+                        note.append(budget_note)
                 if qty <= 0:
-                    ln["reason"] = "Skipped: not enough cash above the reserve / per-order cap"
+                    ln["reason"] = ("Skipped: " + (note[-1].replace("trimmed to", "no room left in")
+                                                   if note else "no budget left"))
                 else:
                     ln.update(qty=qty, cost_cents=qty * unit, status="order",
                               reason=(f"{ln['stock']} in stock ({ln['shelf']} shelf + {ln['stockroom']} stockroom) + {ln['on_order']} on order is at or below "
@@ -174,7 +179,7 @@ class AutoOrder:
         orders = [l for l in lines if l["status"] == "order"]
         return {"mode": self.mode(), "transfers": self._plan_transfers(t), "lines": lines,
                 "total_cost_cents": sum(l["cost_cents"] for l in orders),
-                "budget_after_cents": budget}
+                "budget_after_cents": budget, "limits": lim, "spent_today_cents": spent_today}
 
     # ---- execution ----------------------------------------------------------
     def run(self, actor: str = "auto", now: str | None = None, purchases: bool = True) -> dict:

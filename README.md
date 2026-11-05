@@ -50,12 +50,12 @@ code (`store.py`, `Policy`), not in the prompt, so no conversation can talk them
 | Risk | Defense |
 |---|---|
 | Selling below cost / giveaways | Agent price changes must keep a 10% margin over cost and move ≤50% at a time |
-| Overspending on inventory | Per-order cap ($100) and a $20 cash reserve the agent can't spend |
+| Overspending on inventory | Owner-set spending limits for automatic, plan and shopkeeper orders (defaults sized for bulk: $500 per order, $1,500 per day, $200 cash reserve), enforced in the Store; only the owner can change them |
 | Social engineering by customers | Customer chat runs with read-only tools; customer text is wrapped as untrusted and can never trigger price/order tools |
 | Overselling | Stock decrement is a conditional UPDATE inside a transaction; checkout is all-or-nothing |
 | Underpriced charging | Agent can't set charging below energy cost + 10% or move it >50% at once; customers get read-only `charger_status` |
 | Mistyped meter readings | A session's kWh can't exceed what the charger could physically deliver in the elapsed time |
-| Runaway auto-ordering | Orders count stock already on order (no double-ordering); the Store itself enforces the per-order cap and cash reserve on `auto` orders; agent can only double a par level per step |
+| Runaway auto-ordering | Orders count stock already on order (no double-ordering); the Store itself enforces the per-order and daily spending limits and cash reserve on `auto` orders; agent can only double a par level per step |
 | Owner access from the public kiosk | Separate owner URL; kiosk page ships no owner code; admin API **fails closed** without `ADMIN_TOKEN`; constant-time token check; 5 bad tokens locks that IP out for 5 min; API docs/schema not published |
 | Chat spam burning model credits | Kiosk messages limited to 5/min per IP |
 | Public abuse of problem reports | Kiosk reports are always "normal" severity, can't take equipment offline, and are limited to 3/min per IP; shoppers see only equipment names |
@@ -86,7 +86,9 @@ Charger hardware integration (OCPP) so kWh comes from the meter instead of being
 
 ## Auto-ordering notes
 
-- Reorder trigger = max(product reorder point, ceil(14-day sales/day × (lead time + 1 safety day))). Order qty = enough to reach par, rounded up to whole packs, then trimmed to the per-order cap and cash above the reserve. Scarce cash goes to the items with the fewest days of cover.
+- **Spending limits** (owner dashboard → Auto-order → Spending limits, or `PUT /api/admin/spending-limits`): per order, per day (UTC), and a cash reserve. They apply to automatic, plan-driven and shopkeeper purchase orders; the owner's own manual orders aren't limited or counted. Defaults: $500 / $1,500 / $200.
+
+- Reorder trigger = max(product reorder point, ceil(14-day sales/day × (lead time + 1 safety day))). Order qty = enough to reach par, rounded up to whole packs, then trimmed to the per-order limit and to whichever is lower of cash above the reserve and what's left of today's limit. Scarce cash goes to the items with the fewest days of cover.
 - Default mode is **Suggest**. Switch to **Auto** only after reviewing a few plans.
 - Orders are created as *pending*; mark them received when the delivery arrives. Supplier integration / automatic receiving is not built yet.
 - Lead time is used for the trigger only; delivery ETAs are not tracked.

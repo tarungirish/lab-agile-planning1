@@ -47,6 +47,14 @@
       <div class="card" style="margin-bottom:16px"><h3>Auto-ordering</h3>
         <div class="row" style="justify-content:flex-start;flex-wrap:wrap" id="amode"></div>
         <p class="msg" id="amodehelp"></p></div>
+      <div class="card" style="margin-bottom:16px"><h3>Spending limits</h3>
+        <p class="msg">For automatic, plan and shopkeeper purchase orders. Your own manual orders aren't limited.</p>
+        <div class="stats" style="margin:12px 0">
+          <label><span class="msg">Per order ($)</span><input id="lim_po" type="number" inputmode="decimal" min="1" step="1"></label>
+          <label><span class="msg">Per day ($)</span><input id="lim_day" type="number" inputmode="decimal" min="1" step="1"></label>
+          <label><span class="msg">Keep in reserve ($)</span><input id="lim_res" type="number" inputmode="decimal" min="0" step="1"></label>
+        </div>
+        <div class="row"><span class="msg" id="lim_msg"></span><button class="p" onclick="saveLimits()">Save limits</button></div></div>
       <div class="card" style="margin-bottom:16px"><div class="row"><h3 style="margin:0">Plan</h3>
         <button class="p" id="aorder" onclick="runAuto()">Run plan</button></div>
         <p class="msg" id="atotal"></p>
@@ -93,12 +101,15 @@ async function loadAdmin(){token=$('tok').value||token;
    $('csess').innerHTML='<tr><th>#</th><th>Charger</th><th>Driver</th><th>Started</th><th>kWh</th><th>Cost</th><th></th></tr>'+cs.map(x=>
      `<tr><td>${x.id}</td><td>${esc(x.charger)}</td><td>${esc(x.customer)}</td><td>${esc(x.started_at.slice(5,16))}</td><td>${x.kwh??'–'}</td><td>${x.cost_cents==null?'–':money(x.cost_cents)}</td>
       <td>${x.status==='active'?`<button class="sm" onclick="stopCharge(${x.id})">Stop…</button>`:''}</td></tr>`).join('');
-   const HELP={off:'Nothing is ordered automatically and no suggestions are shown as actions.',suggest:'The plan below is a suggestion. You approve it with “Run plan”.',auto:'The plan runs automatically every hour: pick-list lines are created and vendor orders placed, within spend caps and the cash reserve.'};
+   const HELP={off:'Nothing is ordered automatically and no suggestions are shown as actions.',suggest:'The plan below is a suggestion. You approve it with “Run plan”.',auto:'The plan runs automatically every hour: pick-list lines are created and vendor orders placed, within the spending limits below.'};
    $('amode').innerHTML=['off','suggest','auto'].map(m=>`<button class="${ao.mode===m?'on':''}" onclick="setMode('${m}')">${m[0].toUpperCase()+m.slice(1)}</button>`).join('');
    $('amodehelp').textContent=HELP[ao.mode];
+   {const L=ao.plan.limits,typing=['lim_po','lim_day','lim_res'].includes(document.activeElement&&document.activeElement.id);
+    if(!typing){$('lim_po').value=L.per_order_cents/100;$('lim_day').value=L.daily_cents/100;$('lim_res').value=L.cash_reserve_cents/100}
+    $('lim_msg').textContent=`Ordered automatically today: ${money(ao.plan.spent_today_cents)} of ${money(L.daily_cents)}.`}
    const pl=ao.plan,ords=pl.lines.filter(l=>l.status==='order'),mv=pl.transfers.filter(l=>l.status==='move');
    $('aorder').disabled=!(ords.length||mv.length)||ao.mode==='off';
-   $('atotal').textContent=(mv.length||ords.length)?`${mv.length} item(s) to move to the shelf; ${ords.length} item(s) to buy for ${money(pl.total_cost_cents)}. Cash left above reserve after buying: ${money(Math.max(pl.budget_after_cents,0))}.`:'Nothing needs doing right now.';
+   $('atotal').textContent=(mv.length||ords.length)?`${mv.length} item(s) to move to the shelf; ${ords.length} item(s) to buy for ${money(pl.total_cost_cents)}. Still available to spend after this: ${money(Math.max(pl.budget_after_cents,0))} (the lower of cash above your reserve and what's left of today's limit).`:'Nothing needs doing right now.';
    $('atr').innerHTML=pl.transfers.length?'<tr><th>Item</th><th>Shelf</th><th>Stockroom</th><th>Sells/day</th><th>Move</th></tr>'+pl.transfers.map(l=>
      `<tr><td>${esc(l.name)}<br><span class="msg">${esc(l.reason)}</span></td><td>${l.shelf}</td><td>${l.available}</td><td>${l.velocity_per_day}</td><td><b>${l.qty||'–'}</b></td></tr>`).join(''):'<tr><td class="msg">Shelves are fine.</td></tr>';
    $('aplan').innerHTML=pl.lines.length?'<tr><th>Item</th><th>Shelf + room</th><th>On order</th><th>Sells/day</th><th>Days left</th><th>Order</th><th>Cost</th></tr>'+pl.lines.map(l=>
@@ -158,6 +169,9 @@ async function addTask(){const n=await prompt2('New cleaning task','Name, e.g. W
   const h=await prompt2('How often (in hours)?','24 = daily, 168 = weekly','number');if(h)act(()=>post('/api/admin/cleaning-tasks',{name:n.trim(),area:a.trim()||'general',frequency_hours:parseFloat(h)}))}
 async function addAsset(){const n=await prompt2('New equipment','Name, e.g. Fridge 3');if(!n)return;const k=await prompt2('What kind?','fridge, kiosk, furniture, …')||'equipment';
   const l=await prompt2('Where is it?','market, lounge, …')||'market';act(()=>post('/api/admin/assets',{name:n.trim(),kind:k.trim()||'equipment',location:l.trim()||'market'}))}
+async function saveLimits(){const c=id=>Math.round(parseFloat($(id).value)*100);const body={per_order_cents:c('lim_po'),daily_cents:c('lim_day'),cash_reserve_cents:c('lim_res')};
+  if(Object.values(body).some(v=>!Number.isFinite(v))){await prompt2('Check the limits','','text','Enter a dollar amount in each box.',true);return}
+  act(()=>api('/api/admin/spending-limits',{method:'PUT',body:JSON.stringify(body)}))}
 async function runAgent(){$('arun').disabled=true;$('amsg').textContent='Agent is working…';
   try{const r=await post('/api/admin/agent/run',{task:$('task').value||null});$('areport').textContent=r.report;$('amsg').textContent=''}
   catch(e){$('amsg').textContent=e.message}$('arun').disabled=false;loadAdmin()}

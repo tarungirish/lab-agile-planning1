@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS restocks (
   product_id INTEGER NOT NULL REFERENCES products(id),
   qty INTEGER NOT NULL CHECK (qty > 0),
   unit_cost_cents INTEGER NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending'  -- pending | received | cancelled
+  status TEXT NOT NULL DEFAULT 'pending',  -- pending | received | cancelled
+  ordered_by TEXT NOT NULL DEFAULT 'staff' -- staff (owner, manual) | agent | auto | staff-approved (plan run)
 );
 -- Cash ledger: positive = money in, negative = money out.
 CREATE TABLE IF NOT EXISTS ledger (
@@ -207,6 +208,7 @@ class Database:
 MIGRATIONS = [
     ("notes", "source", "source TEXT NOT NULL DEFAULT 'agent'", None),
     ("issues", "triage_note", "triage_note TEXT", None),
+    ("restocks", "ordered_by", "ordered_by TEXT NOT NULL DEFAULT 'staff'", None),
     ("cleaning_tasks", "created_at", "created_at TEXT NOT NULL DEFAULT '1970-01-01 00:00:00'",
      "UPDATE cleaning_tasks SET created_at=datetime('now') WHERE created_at='1970-01-01 00:00:00'"),
 ]
