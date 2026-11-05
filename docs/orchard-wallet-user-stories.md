@@ -40,7 +40,7 @@ In store total spend - $__
 ## Decisions
 
 * **Payments:** Stripe. The Orchard card is tied to the driver's default wallet card (Apple Pay / Google Pay), saved at signup for later charges made without the driver present. The charge happens only after the session completes.
-* **Club fee:** every charging session automatically includes a club access fee of **$5** (public; fleet is $3 unless decided otherwise). There is no opt-in text or prompt, so using the club is never a decision for the driver. The fee is shown at signup and on every receipt.
+* **Club fee:** every charging session automatically includes a flat club access fee of **$3**, for every driver including fleet. There is no opt-in text or prompt, so using the club is never a decision for the driver. The fee is shown prominently at signup and on every receipt. The fee is the only club charge: there are no day passes, memberships, or other access products. It exists to control the moment of charging and access to the lounge, and to bring drivers out of the car.
 * **No prepaid balance:** preloads, top-up links, and the balance ledger are removed from scope.
 * **Door:** an NFC reader at the club entrance reads the Orchard pass. The pass carries only an ID; the reader (or its controller) asks Orchard's backend whether that ID may enter, and unlocks the door on approval.
 
@@ -61,7 +61,7 @@ To confirm in the build agreement and spec:
 
 ## Open questions
 
-* Fleet price: does the club fee stay $3 for fleet drivers, and how is fleet status determined (fleet code, fleet account)? Who is billed?
+* Fleet: the $3 fee applies to fleet drivers too. How is fleet status determined (fleet code, fleet account), and does the fleet company or the driver pay?
 * Disclosure: where is the automatic club fee shown to the driver (signup page and terms, charger screen or label, receipts)? Confirm what your state requires for disclosing mandatory fees.
 * Is the fee charged if a session is very short or stopped early, or if the charger faults? Refund policy for those cases.
 * Apple and Google must approve Orchard for NFC-enabled passes (Apple VAS / NFC pass entitlement, Google Smart Tap). Start the applications early; this gates both the chargers and the door reader.
@@ -89,6 +89,8 @@ To confirm in the build agreement and spec:
 * Web signup collects name, mobile number, email, and optional fleet code.
 * The phone number is the account identifier and must be unique. It is verified with a one-time text code.
 * Signup includes text-message consent.
+* The signup page shows the $3 access fee prominently, before the driver links a card or agrees to the terms. The prototype is in `prototype/signup.html`.
+* Signup requires an explicit tick to agree to: texts, being charged to the saved card after each session, and the $3 access fee added to every session.
 
 #### Acceptance Criteria
 
@@ -96,6 +98,14 @@ To confirm in the build agreement and spec:
 Given I enter a phone number not used by another account
 When I enter the correct verification code from the text
 Then my account is created
+
+Given I am on the signup page
+When I view it before linking a card
+Then the $3 access fee added to every charging session is clearly shown, with a statement that it applies whether or not I visit the club
+
+Given I have not ticked the agreement
+When I try to continue
+Then I cannot link a card
 
 Given a phone number already has an account
 When someone signs up with that number
@@ -241,7 +251,7 @@ Then I receive a text telling me charging is complete, with the account summary
 **So that** I pay for the session and club access only after I have used the station
 
 #### Details and Assumptions
-* Total = charging cost (if Orchard bills it) + club fee ($5 public, $3 fleet unless decided otherwise).
+* Total = charging cost (if Orchard bills it) + club access fee ($3).
 * The club fee applies to every session, whether or not the driver visits the club.
 * The charge uses the saved card as an off-session Stripe payment.
 * Use an idempotency key per session so a repeated event never charges twice.
@@ -252,7 +262,7 @@ Then I receive a text telling me charging is complete, with the account summary
 ```gherkin
 Given my charging session has completed
 When the system processes the payment
-Then my card is charged once for the session total, including the $5 club fee
+Then my card is charged once for the session total, including the $3 club access fee
 
 Given my session is still in progress
 When anything is owed
@@ -346,7 +356,7 @@ Then Today's spend, kWh usage and in-store spend show zero, and Purchased shows 
 
 #### Details and Assumptions
 * Search by phone, email, or name.
-* Set or change user type (public/fleet) and change an account's phone number.
+* Set or change user type (public/fleet) and change an account's phone number. User type does not change the access fee.
 * View sessions, door taps, purchases, declined taps, and failed payments.
 * Refund a charge through Stripe, with a reason recorded.
 * Suspend or reactivate an account.
@@ -356,7 +366,7 @@ Then Today's spend, kWh usage and in-store spend show zero, and Purchased shows 
 ```gherkin
 Given I am a signed-in staff member
 When I change an account's user type from public to fleet
-Then future fleet pricing applies to that account
+Then the account is marked as fleet for reporting and billing, and the access fee is unchanged
 
 Given a card charge has failed
 When I open the dashboard
