@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orchard Texts</title>
+<!--
+  PROTOTYPE ONLY. A mock of the text conversation between a driver and Orchard's number.
+  Replies come from a small keyword matcher over made-up demo data. In the real build,
+  every number comes from Orchard's records, and an AI model (if used) only picks one of
+  these fixed read-only requests. Money or account changes always go through a secure link.
+-->
+<style>
+  :root {
+    --bg: #f6f7f4; --surface: #ffffff; --text: #1b2a1f; --muted: #5b6b5f; --line: #dde3da;
+    --brand: #2f6b3f; --brand-ink: #ffffff; --in: #e9ece7; --focus: #1a73e8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121a14; --surface: #1b251e; --text: #e8efe9; --muted: #9fb0a3; --line: #2c3a30;
+      --brand: #6cc287; --brand-ink: #0d1a11; --in: #26332a; --focus: #8ab4f8;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .phone { max-width: 440px; height: 100dvh; margin: 0 auto; display: flex; flex-direction: column; background: var(--surface); border-inline: 1px solid var(--line); }
+  header { padding: 12px 16px; border-bottom: 1px solid var(--line); text-align: center; }
+  header .logo { width: 36px; height: 36px; border-radius: 50%; background: var(--brand); display: block; margin: 0 auto 4px; }
+  header b { display: block; font-size: 15px; }
+  header span { color: var(--muted); font-size: 12px; }
+  #log { flex: 1; overflow-y: auto; padding: 14px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .time { align-self: center; color: var(--muted); font-size: 12px; margin: 8px 0 2px; }
+  .msg { max-width: 82%; padding: 9px 13px; border-radius: 18px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; }
+  .msg.in { align-self: flex-start; background: var(--in); border-bottom-left-radius: 5px; }
+  .msg.out { align-self: flex-end; background: var(--brand); color: var(--brand-ink); border-bottom-right-radius: 5px; }
+  .msg a { color: inherit; text-decoration: underline; }
+  .summary { display: block; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+  .chips { display: flex; gap: 8px; overflow-x: auto; padding: 8px 12px; border-top: 1px solid var(--line); }
+  .chips button { flex: none; background: transparent; color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; font-size: 14px; cursor: pointer; }
+  form { display: flex; gap: 8px; padding: 8px 12px 12px; }
+  input { flex: 1; padding: 11px 14px; font-size: 16px; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 999px; min-width: 0; }
+  form button { border: 0; background: var(--brand); color: var(--brand-ink); font-weight: 700; border-radius: 999px; padding: 0 18px; cursor: pointer; }
+  input:focus-visible, button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  .note { text-align: center; color: var(--muted); font-size: 12px; padding: 0 12px 8px; }
+</style>
+</head>
+<body>
+<div class="phone">
+  <header>
+    <span class="logo" aria-hidden="true"></span>
+    <b>Orchard</b>
+    <span>Text Message &middot; (555) 010-0100</span>
+  </header>
+
+  <div id="log" role="log" aria-live="polite" aria-label="Text conversation"></div>
+
+  <div class="chips" role="group" aria-label="Quick replies">
+    <button type="button">Charging history</button>
+    <button type="button">Total spend</button>
+    <button type="button">Last receipt</button>
+    <button type="button">Usage</button>
+    <button type="button">Link</button>
+    <button type="button">Update card</button>
+    <button type="button">Help</button>
+  </div>
+  <form id="f" autocomplete="off">
+    <label for="t" style="position:absolute;left:-9999px">Message</label>
+    <input id="t" placeholder="Text Orchard" enterkeyhint="send">
+    <button type="submit">Send</button>
+  </form>
+  <p class="note">Prototype: keyword matching on demo data</p>
+</div>
+
+<script>
+  const log = document.getElementById('log');
+  const SUMMARY = "Today's spend - $17.65\nPurchased - Water, Protein bar\nYear to date kWh usage - 412.6 kWh\nIn store total spend - $62.75";
+
+  function add(who, text, opts = {}) {
+    const d = document.createElement('div');
+    d.className = 'msg ' + who;
+    const body = document.createElement('span');
+    body.innerHTML = text.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/(https?:\/\/\S+)/g, '<a href="#" onclick="return false">$1</a>');
+    d.appendChild(body);
+    if (opts.summary) {
+      const s = document.createElement('span'); s.className = 'summary'; s.textContent = SUMMARY;
+      d.appendChild(s);
+    }
+    log.appendChild(d);
+    log.scrollTop = log.scrollHeight;
+  }
+  function stamp(t) { const e = document.createElement('div'); e.className = 'time'; e.textContent = t; log.appendChild(e); }
+
+  // Notifications Orchard has already sent for today's session
+  stamp('Today 1:22 pm');
+  add('in', "Charging started at Charger 4. The $3 club access fee is added to every session, so the club is open to you. Tap your Orchard card at the club door to enter.");
+  stamp('Today 1:58 pm');
+  add('in', "Your car is at 80%. Reply STOP CHARGING to finish now, or keep going.", { summary: true });
+  stamp('Today 2:14 pm');
+  add('in', "Charging complete. 38.2 kWh, $11.40 total (charging $8.40 + $3.00 club access fee), charged to Visa 4242.\nSee your session: https://orchard.example/s/k3x9TqW2mZ", { summary: true });
+
+  const SESSIONS = [
+    ['Nov 5', '38.2 kWh', '$11.40'],
+    ['Oct 28', '61.0 kWh', '$17.10'],
+    ['Oct 14', '21.5 kWh', '$9.30'],
+  ];
+
+  const HELP = "You can text me:\nHISTORY - your last sessions\nSPEND - what you've spent\nUSAGE - your kWh\nRECEIPT - your last session\nLINK - a fresh link to your page\nCARD - update your payment card";
+
+  function reply(raw) {
+    const q = raw.toLowerCase();
+    if (/\bstop\b/.test(q) && !/stop charging/.test(q)) return ["You're unsubscribed from Orchard texts. Reply START to resume.", false];
+    if (/stop charging/.test(q)) return ["Your session already finished at 2:14 pm. Nothing to stop.", false];
+    if (/(history|sessions|charges|charged)/.test(q)) return [
+      "Your last 3 sessions:\n" + SESSIONS.map(s => `${s[0]} - ${s[1]} - ${s[2]}`).join('\n') + "\nFull history: https://orchard.example/h/p7LmQa4Xv", true];
+    if (/(spend|spent|total|cost|how much)/.test(q)) return [
+      "This month: $17.65 (charging $8.40, club access fees $3.00, store $6.25).\nThis year: $284.30.", true];
+    if (/(kwh|usage|energy|power)/.test(q)) return ["You've used 412.6 kWh so far this year.", true];
+    if (/(receipt|last)/.test(q)) return [
+      "Last session, Nov 5, Charger 4:\n38.2 kWh\nCharging $8.40\nClub access fee $3.00\nTotal $11.40 to Visa 4242\nhttps://orchard.example/s/k3x9TqW2mZ", true];
+    if (/(link|page)/.test(q)) return ["Here's your latest session page: https://orchard.example/s/n8Rz4cHd1B", false];
+    if (/(card|payment|update)/.test(q)) return ["To change your payment card, use this secure link (it expires in 15 minutes): https://orchard.example/pay/u4Ft9wLs0Q\nWe never take card details by text.", false];
+    if (/(dispute|refund|wrong|complain|problem|human|agent)/.test(q)) return ["I've passed this to the Orchard team. Someone will text you back soon.", false];
+    if (/help|menu|\?/.test(q)) return [HELP, false];
+    return ["Sorry, I didn't get that.\n" + HELP, false];
+  }
+
+  function send(text) {
+    const t = text.trim(); if (!t) return;
+    add('out', t);
+    const [r, s] = reply(t);
+    setTimeout(() => add('in', r, { summary: s }), 450);
+  }
+
+  document.getElementById('f').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const i = document.getElementById('t'); send(i.value); i.value = '';
+  });
+  document.querySelectorAll('.chips button').forEach(b => b.addEventListener('click', () => send(b.textContent)));
+  log.scrollTop = log.scrollHeight;
+</script>
+</body>
+</html>

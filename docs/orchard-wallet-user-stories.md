@@ -213,6 +213,7 @@ Then it contains a secure Stripe link and no card details are entered on the Orc
 * Anything that changes money or account details (update card, refunds, changing the number) is never done by text alone. It sends a secure link, or is handled by staff.
 * Unrecognized messages get a short help message. A request that needs a human ("dispute a charge") is passed to staff in the dashboard, and the driver is told someone will reply.
 * STOP, HELP, and START keep working as carrier rules require.
+* Prototype: `prototype/texts.html` shows the conversation, including the notifications sent for a session and the replies to each request.
 * The sender number is the only proof of identity. Because phone numbers can be spoofed or taken over (SIM swap), replies contain no full card numbers or other sensitive details, and rate limits apply per number.
 
 #### Acceptance Criteria
