@@ -10,6 +10,7 @@ Anthropic's [Project Vend](https://www.anthropic.com/research/project-vend-1).
 - **Staff page** (`/staff`, `STAFF_TOKEN`): cleaners get just the cleaning checklist and issues, with no access to finances or the owner dashboard.
 - **EV charging** (`micromarket/charging.py`): chargers tagged by location (lot, lounge, …), start/stop sessions, per-kWh billing into the same cash ledger, and usage trends (by hour, day and location, utilization, margin over energy cost, and how often drivers also shop).
 - **Stockroom** (`micromarket/stockroom.py`): we are our own supplier. Vendor deliveries land in the stockroom; shelves (what the kiosk sells) are restocked from it via a pick list. Stock counts for shrink/miscounts.
+- **Cooler / shelf cameras** (`micromarket/vision.py`): cameras POST photos; Claude vision counts each product that belongs in view; counts are reconciled against the system. Differences must show up in two photos before anything happens: in Suggest mode they're flagged on a ticket (owner can accept the camera count in one tap), in Auto mode small confirmed corrections are applied and auto-ordering reacts immediately.
 - **Auto-ordering** (`micromarket/autoorder.py`): per-product reorder rules (par level, pack size, lead time, supplier). A planner turns sales velocity and current/on-order stock into an explained order plan. Modes: Off / Suggest (owner approves) / Auto (hourly background job).
 - **Shopkeeper duties** (routine review, by button or on a schedule with `AGENT_REVIEW_INTERVAL_MIN`): runs the auto-order plan *as your mode allows* (Off: nothing; Suggest: the free stockroom-to-shelf pick list only, purchases wait for you; Auto: purchases too), files "Cleaning overdue" tickets that close themselves when staff sign the task off, and triages open tickets (low/normal/high plus a note). It can never mark anything critical, resolve tickets, or take equipment offline.
 - **AI shopkeeper** (`micromarket/agent.py`): Claude with tools to read inventory/sales, reprice, order stock, and keep a notes scratchpad.
@@ -40,7 +41,7 @@ uvicorn micromarket.app:create_app --factory
 pytest
 ```
 
-Env vars: `AGENT_REVIEW_INTERVAL_MIN` (run the shopkeeper's review on a schedule; default 0 = off, since each run is a paid model call), `MICROMARKET_ALLOW_OPEN_ADMIN=1` (local dev only: allow admin with no token), `MICROMARKET_DB` (SQLite path), `AUTO_ORDER_INTERVAL_MIN` (scheduler period, default 60; only acts in Auto mode), `MICROMARKET_MODEL` (default `claude-opus-5-5`), `ADMIN_TOKEN`.
+Env vars: `CAMERA_TOKEN` (cameras' upload code; uploads are disabled without it), `CAMERA_MIN_INTERVAL_S` (default 120: photos closer together are stored but not counted), `MICROMARKET_VISION_MODEL` (default `claude-opus-5-5`), `MICROMARKET_IMAGE_DIR` (default `camera_images/`), `AGENT_REVIEW_INTERVAL_MIN` (run the shopkeeper's review on a schedule; default 0 = off, since each run is a paid model call), `MICROMARKET_ALLOW_OPEN_ADMIN=1` (local dev only: allow admin with no token), `MICROMARKET_DB` (SQLite path), `AUTO_ORDER_INTERVAL_MIN` (scheduler period, default 60; only acts in Auto mode), `MICROMARKET_MODEL` (default `claude-opus-5-5`), `ADMIN_TOKEN`.
 
 ## Design: lessons from Project Vend
 
@@ -63,6 +64,8 @@ code (`store.py`, `Policy`), not in the prompt, so no conversation can talk them
 | Agent over-reach on facilities | Agent can file low/normal/high tickets only; in customer chat it can only pass on a normal-priority complaint |
 | Agent ordering beyond what you allowed | `run_auto_order_plan` follows the owner's mode (Off / Suggest / Auto); in Suggest, purchases are returned for approval instead of placed |
 | Agent overriding people on safety | Triage is limited to low/normal/high; critical issues, resolving, and taking equipment offline stay with people |
+| Camera miscounts changing inventory | Counts never overwrite silently: ±1 is treated as agreement (someone may be paying), a difference must repeat in two photos, Auto mode applies only high-confidence corrections of at most max(3, 25%), everything else goes to a person |
+| Photos steering the AI | The vision call has no tools and a fixed JSON schema; anything it writes reaches the shopkeeper as `untrusted_camera_note` |
 | Unaccountable changes | Every agent/staff change is written to an audit log; refunds are staff-only |
 
 Staff actions through the owner API bypass the agent policy but are still logged.
@@ -128,3 +131,22 @@ The three Medium findings from the review are fixed (see `tests/test_security_fi
 Also hardened: a Content-Security-Policy plus `X-Frame-Options`, `nosniff`, `Referrer-Policy` and `Permissions-Policy` on every response; inline handlers use a `js()` helper (JSON string literal, then HTML-escaped) instead of `esc()` inside quotes; checkout accepts only `card`/`cash` and bounded fields.
 
 Still open: **no payment verification** (any checkout is recorded as paid until a payment processor is integrated). The CSP needs `'unsafe-inline'` for the inline scripts; moving them to files would allow a stricter policy.
+
+## Cameras
+
+**Connecting a camera.** Anything that can send an HTTP POST works (a Raspberry Pi with a camera module, an IP camera with a webhook or script). Mount it inside the cooler facing the shelves, register it on the owner page (Stockroom → Cameras → + Camera, listing the SKUs it sees), and have it send a photo, ideally a few seconds after the door closes:
+
+```bash
+curl -X POST https://your-host/api/cameras/<camera id>/snapshot \
+     -H "X-Camera-Token: $CAMERA_TOKEN" -H "Content-Type: image/jpeg" --data-binary @shelf.jpg
+```
+
+**What happens to a photo.** It is checked (JPEG/PNG only, 8 MB max, decompression bombs refused), re-encoded without metadata and scaled to at most 1568 px, then counted. Only the latest 48 photos per camera are kept, and only the owner can view them.
+
+**Reconciliation rules.** ±1 unit = match (a shopper may be paying). A bigger difference is *pending* until a second photo within 3 hours shows the same count. Then: **Suggest** (default) flags it on a "Camera count check" ticket; **Auto** applies it if confidence is high and the change is at most max(3, 25%), otherwise flags it. Low-confidence counts and unusable photos (door open, fogged) change nothing. The ticket closes itself when camera and system agree again. **Off** stores photos without counting.
+
+**Cost.** Each counted photo is one Claude vision request; `CAMERA_MIN_INTERVAL_S` limits how often a camera is counted. A smaller model can be set with `MICROMARKET_VISION_MODEL` if accuracy holds up on your shelves. Test on real photos before switching to Auto.
+
+**Privacy.** Point cameras at the product, not the aisle, and tell shoppers the coolers have cameras where your local rules require it.
+
+**Demo.** `python -m micromarket.demo` adds three simulated cameras that draw the shelves and post a photo every 5 minutes through the real upload API (`--camera-every`). Without an API key the counting is simulated (labelled); with one, Claude vision counts the drawn images. Two colas are "missing" in the demo so you can see a flag and accept it.

@@ -21,6 +21,8 @@ def test_demo_data_shows_every_interesting_state(demo):
     states = {c["status"] for c in fac["cleaning"]}
     assert {"ok", "due_soon", "overdue"} <= states
     assert fac["open_issues"] >= 2 and 0.5 < fac["compliance"]["overall"] <= 1.0
+    flagged = demo.db.execute("SELECT sku FROM camera_counts WHERE action='flagged'").fetchall()
+    assert [r["sku"] for r in flagged] == ["COKE"]                       # the 2 unpaid colas were caught
     sessions = demo.db.execute("SELECT status, COUNT(*) n FROM charging_sessions GROUP BY status").fetchall()
     counts = {r["status"]: r["n"] for r in sessions}
     assert counts["active"] == 1 and counts["completed"] > 20
@@ -36,6 +38,7 @@ def test_scripted_manager_run_uses_real_tools_and_changes_nothing_risky():
     prices = {p["sku"]: p["price_cents"] for p in store.list_products()}
     report = Shopkeeper(store, client=ScriptedClient()).run_manager()
     assert BANNER in report and "Morning review" in report and "Trail mix" in report
+    assert "Cola can: camera 2, system 4" in report
     assert {p["sku"]: p["price_cents"] for p in store.list_products()} == prices
     assert store.list_notes()[-1]["body"].startswith("Morning review")                   # a real add_note tool call
     assert any(a["action"] == "manager_run" for a in store.list_audit())

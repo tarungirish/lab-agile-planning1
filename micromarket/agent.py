@@ -19,6 +19,7 @@ from .autoorder import AutoOrder
 from .charging import Charging
 from .facilities import AGENT_SEVERITIES, Facilities
 from .store import Store, StoreError
+from .vision import Cameras, VisionCounter
 
 MODEL = os.environ.get("MICROMARKET_MODEL", "claude-opus-5-5")
 MAX_TURNS = 12
@@ -35,6 +36,8 @@ Your routine:
   Suggest = only the free stockroom-to-shelf pick list (purchases wait for the owner), Auto = purchases too.
 - Cleaning: if anything is overdue, use remind_overdue_cleaning so the staff see a ticket.
 - Tickets: read facilities_report and triage open issues (adjust low/normal/high, add a short note on what to do).
+- Cameras: camera_report shows what the cooler cameras counted versus the system. Mention flagged differences
+  to the owner (possible shrink or miscount); you can't change counts yourself.
   You can't mark anything critical, resolve issues, or take equipment offline; recommend that to the owner instead.
 
 Rules:
@@ -117,6 +120,10 @@ _TOOLS = {
         "description": "File one normal-priority 'Cleaning overdue' ticket per overdue cleaning task so staff see it. Skips tasks that already have an open reminder; the ticket closes itself when staff log the clean.",
         "input_schema": _EMPTY,
     },
+    "camera_report": {
+        "description": "Latest cooler/shelf camera counts versus the system's shelf counts, per camera: match, pending (waiting for a second photo), flagged (needs a person), applied/accepted (count corrected). Any note from the vision model is under untrusted_camera_note. Read-only.",
+        "input_schema": _EMPTY,
+    },
     "report_issue": {
         "description": "Open a facilities ticket (e.g. a fridge running warm). Severity low/normal/high only; taking equipment out of service is the owner's call.",
         "input_schema": {"type": "object", "properties": {
@@ -156,11 +163,13 @@ def _label_public_issue(issue: dict) -> dict:
 
 
 class Shopkeeper:
-    def __init__(self, store: Store, client: anthropic.Anthropic | None = None, model: str = MODEL):
+    def __init__(self, store: Store, client: anthropic.Anthropic | None = None, model: str = MODEL,
+                 vision: VisionCounter | None = None, image_dir: str | None = None):
         self.store = store
         self.charging = Charging(store)
         self.facilities = Facilities(store)
         self.autoorder = AutoOrder(store)
+        self.cameras = Cameras(store, counter=vision, image_dir=image_dir)
         self._client = client
         self.model = model
 
@@ -220,6 +229,8 @@ class Shopkeeper:
                 int(args["issue_id"]), args.get("severity"), args.get("note"), actor="agent")))
         if name == "remind_overdue_cleaning":
             return json.dumps(self.facilities.remind_overdue_cleaning(actor="agent"))
+        if name == "camera_report":
+            return json.dumps(self.cameras.report())
         if name == "report_issue":
             asset = next((a for a in self.facilities.list_assets()
                           if a["name"].lower() == (args.get("asset") or "").lower()), None)

@@ -27,6 +27,9 @@
       <div class="card" style="margin-bottom:16px"><div class="row"><h3 style="margin:0">Pick list: stockroom → shelf</h3>
         <button class="p" id="tall" onclick="doneAll()">All done</button></div>
         <p class="msg" id="tmsg"></p><table id="ptl"></table></div>
+      <div class="card" style="margin-bottom:16px"><div class="row"><h3 style="margin:0">Cameras</h3><button class="sm" onclick="addCamera()">+ Camera</button></div>
+        <div class="row" style="justify-content:flex-start;flex-wrap:wrap" id="cmode"></div><p class="msg" id="cmodehelp"></p>
+        <div id="camlist"></div></div>
       <div class="card"><h3>Stock on hand</h3><table id="stk"></table></div></div>
     <div id="p-fac" class="hide">
       <div class="stats" id="fstats"></div>
@@ -75,7 +78,7 @@ function tab(t){tabNow=t;for(const[k]of TABS)$('p-'+k).classList.toggle('hide',k
 function drawTabs(){$('tabs').innerHTML=TABS.map(([k,l])=>`<button class="${k===tabNow?'on':''}" onclick="tab('${k}')">${l}</button>`).join('')}
 /* ---- owner ---- */
 async function loadAdmin(){token=$('tok').value||token;
-  try{await api('/api/admin/ping');$('derr').textContent='';const [s,inv,rs,sales,audit,ct,cs,ao,sr,fc]=await Promise.all(['summary','products','restocks','sales','audit','charging/trends?days='+$('cdays').value,'charging/sessions','autoorder','stockroom','facilities'].map(p=>api('/api/admin/'+p)));
+  try{await api('/api/admin/ping');$('derr').textContent='';const [s,inv,rs,sales,audit,ct,cs,ao,sr,fc,cm]=await Promise.all(['summary','products','restocks','sales','audit','charging/trends?days='+$('cdays').value,'charging/sessions','autoorder','stockroom','facilities','cameras'].map(p=>api('/api/admin/'+p)));
    $('login').classList.add('hide');$('dash').classList.remove('hide');tab(tabNow);
    const card=(k,v)=>`<div class="card"><span class="msg">${k}</span><b>${v}</b></div>`;
    $('stats').innerHTML=[['Cash',money(s.cash_cents)],['Revenue',money(s.revenue_cents)],['Gross profit',money(s.gross_profit_cents)],['Sales',s.sales_count],['Low stock',s.low_stock.length]].map(x=>card(...x)).join('');
@@ -138,6 +141,18 @@ async function loadAdmin(){token=$('tok').value||token;
      <td>${i.status==='open'?`<button class="sm" onclick="issueUpd(${i.id},'in_progress')">Start</button> `:''}<button class="sm p" onclick="issueResolve(${i.id})">Resolve</button></td></tr>`).join(''):'<tr><td class="msg">No open issues. 🎉</td></tr>';
    $('fass').innerHTML='<tr><th>Equipment</th><th>Where</th><th>Status</th><th>Issues</th><th></th></tr>'+fc.assets.map(a=>`<tr><td>${esc(a.name)}<br><span class="msg">${esc(a.kind)}</span></td><td>${esc(a.location)}</td>
      <td><span class="pill ${ST[a.status]}">${a.status.replace(/_/g,' ')}</span></td><td>${a.open_issues}</td><td><button class="sm" onclick="issueNew(${a.id},${js(a.name)})">Report issue</button></td></tr>`).join('');
+   const CH={off:'Photos are kept but not counted.',suggest:'Cameras count the shelves. A difference confirmed by two photos is flagged for you to check or accept; counts are never changed on their own.',
+     auto:'Small differences confirmed by two clear photos are corrected automatically (and auto-ordering reacts); bigger or less certain ones are flagged for you.'};
+   $('cmode').innerHTML=['off','suggest','auto'].map(m=>`<button class="${cm.mode===m?'on':''}" onclick="camMode(${js(m)})">${m[0].toUpperCase()+m.slice(1)}</button>`).join('');
+   $('cmodehelp').textContent=CH[cm.mode];
+   const CS={match:'',pending:'warn',flagged:'bad',applied:'',accepted:'',low_confidence:'warn'};
+   $('camlist').innerHTML=cm.cameras.map(c=>{const l=c.latest;return `<div class="task" style="align-items:flex-start;flex-wrap:wrap">
+     <div style="flex:0 0 220px"><img id="camimg-${c.id}" alt="Latest photo from ${esc(c.name)}" style="width:220px;aspect-ratio:4/3;object-fit:cover;border-radius:10px;background:var(--line)">
+       <span class="msg">${l?esc(l.ts.slice(5,16))+' · '+esc(l.status)+(l.note?' — '+esc(l.note):''):'No photo yet'}</span></div>
+     <div style="flex:1;min-width:260px"><b>${esc(c.name)}</b><table>${c.counts.length?'<tr><th>Item</th><th>Camera</th><th>System</th><th>Status</th><th></th></tr>'+c.counts.map(x=>`<tr><td>${esc(x.name)}</td><td><b>${x.counted}</b></td><td>${x.system}${x.shelf_now!==x.system?`<br><span class="msg">now ${x.shelf_now}</span>`:''}</td>
+       <td><span class="pill ${CS[x.action]}">${x.action.replace('_',' ')}</span>${x.confidence!=='high'?`<br><span class="msg">${esc(x.confidence)} confidence</span>`:''}</td>
+       <td>${['flagged','pending'].includes(x.action)?`<button class="sm" onclick="acceptCount(${x.id},${js(x.name)},${x.counted})">Accept ${x.counted}</button>`:''}</td></tr>`).join(''):'<tr><td class="msg">No counted photo yet.</td></tr>'}</table></div></div>`}).join('')||'<p class="msg">No cameras yet.</p>';
+   for(const c of cm.cameras)loadCamImage(c);
    $('audit').innerHTML='<tr><th>When</th><th>Actor</th><th>Action</th><th>Detail</th></tr>'+audit.map(a=>
      `<tr><td>${esc(a.ts.slice(5,16))}</td><td>${esc(a.actor)}</td><td>${esc(a.action)}</td><td>${esc((a.detail||'').slice(0,100))}</td></tr>`).join('')}
   catch(e){$('lerr').textContent=e.message;$('derr').textContent='Could not refresh the dashboard: '+e.message+'. Showing the last data loaded.'}}
@@ -172,6 +187,18 @@ async function addAsset(){const n=await prompt2('New equipment','Name, e.g. Frid
 async function saveLimits(){const c=id=>Math.round(parseFloat($(id).value)*100);const body={per_order_cents:c('lim_po'),daily_cents:c('lim_day'),cash_reserve_cents:c('lim_res')};
   if(Object.values(body).some(v=>!Number.isFinite(v))){await prompt2('Check the limits','','text','Enter a dollar amount in each box.',true);return}
   act(()=>api('/api/admin/spending-limits',{method:'PUT',body:JSON.stringify(body)}))}
+const camBlobs={};   // snapshot id -> object URL, so photos aren't re-downloaded on every refresh
+async function loadCamImage(c){const img=$('camimg-'+c.id),l=c.latest;if(!img||!l||!l.image_path)return;
+  if(!camBlobs[l.id]){try{const r=await fetch(`/api/admin/cameras/snapshots/${l.id}/image`,{headers:authHeaders()});if(!r.ok)return;
+    for(const k of Object.keys(camBlobs))if(k.startsWith(c.id+':')){URL.revokeObjectURL(camBlobs[k]);delete camBlobs[k]}
+    camBlobs[l.id]=URL.createObjectURL(await r.blob());camBlobs[c.id+':'+l.id]=camBlobs[l.id]}catch(e){return}}
+  img.src=camBlobs[l.id]}
+const camMode=m=>act(()=>api('/api/admin/cameras/mode',{method:'PUT',body:JSON.stringify({mode:m})}));
+async function acceptCount(id,name,n){const v=await prompt2('Set '+name+' on the shelf to '+n+'?','Type YES to accept the camera count');
+  if(v&&v.trim().toUpperCase()==='YES')act(()=>post(`/api/admin/cameras/counts/${id}/accept`))}
+async function addCamera(){const n=await prompt2('New camera','Name, e.g. Fridge 1 camera');if(!n)return;
+  const k=await prompt2('Which products does it see?','SKUs separated by commas, e.g. COKE, WATER');if(!k)return;
+  act(()=>post('/api/admin/cameras',{name:n.trim(),skus:k.split(',').map(x=>x.trim()).filter(Boolean)}))}
 async function runAgent(){$('arun').disabled=true;$('amsg').textContent='Agent is working…';
   try{const r=await post('/api/admin/agent/run',{task:$('task').value||null});$('areport').textContent=r.report;$('amsg').textContent=''}
   catch(e){$('amsg').textContent=e.message}$('arun').disabled=false;loadAdmin()}

@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from .agent import Shopkeeper
 from .db import connect
 from .facilities import SEVERITIES
+from .vision import MAX_UPLOAD_BYTES
 from .store import Store, StoreError
 
 STATIC = Path(__file__).parent / "static"
@@ -177,6 +178,12 @@ class SpendingIn(BaseModel):
     cash_reserve_cents: int | None = Field(None, ge=0)
 
 
+class CameraIn(BaseModel):
+    name: str = Field(min_length=2, max_length=80)
+    skus: list[str] = Field(min_length=1, max_length=40)
+    asset_id: int | None = None
+
+
 class TaskIn(BaseModel):
     task: str | None = Field(None, max_length=2000)
 
@@ -184,7 +191,7 @@ class TaskIn(BaseModel):
 # Inline <script> blocks and onclick handlers need 'unsafe-inline'; everything else is same-origin only,
 # so injected code still can't load external scripts or send data to another host.
 CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
-       "img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; "
+       "img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; "
        "form-action 'self'; frame-ancestors 'none'")
 SECURITY_HEADERS = {"Content-Security-Policy": CSP, "X-Content-Type-Options": "nosniff",
                     "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer",
@@ -199,6 +206,7 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
     charging = agent.charging
     auto = agent.autoorder
     fac = agent.facilities
+    cams = agent.cameras
     room = auto.stockroom
     if auto_order_interval_s is None:
         auto_order_interval_s = float(os.environ.get("AUTO_ORDER_INTERVAL_MIN", "60")) * 60
@@ -245,7 +253,7 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
             # Fail closed: a public kiosk must never expose private routes by accident.
             if os.environ.get("MICROMARKET_ALLOW_OPEN_ADMIN") == "1":
                 return "ADMIN_TOKEN"  # explicit local-dev escape hatch
-            raise HTTPException(503, "Access is disabled: set the ADMIN_TOKEN environment variable")
+            raise HTTPException(503, f"Access is disabled: set the {' or '.join(env_names)} environment variable")
         ip = request.client.host if request.client else "?"
         if login_fails.blocked(ip):
             raise HTTPException(429, "Too many failed attempts. Try again in a few minutes.")
@@ -262,6 +270,10 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
     def staff(request: Request, x_admin_token: str | None = Header(None)) -> str:
         # Cleaners/floor staff: STAFF_TOKEN reaches only /api/staff/*; the owner token works there too.
         return "owner" if _authenticate(request, x_admin_token, ["STAFF_TOKEN", "ADMIN_TOKEN"]) == "ADMIN_TOKEN" else "staff"
+
+    def camera(request: Request, x_camera_token: str | None = Header(None)):
+        # Cameras upload photos with their own code; it opens nothing else.
+        _authenticate(request, x_camera_token, ["CAMERA_TOKEN"])
 
     @app.exception_handler(StoreError)
     async def _store_error(_, exc: StoreError):
@@ -332,6 +344,17 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
     def charge_start(charger_id: int, body: StartIn):
         s = charging.start(charger_id, body.customer)
         return {k: s[k] for k in ("id", "charger", "started_at", "price_cents_per_kwh")}
+
+    # --- cameras: photo upload only ---
+    @app.post("/api/cameras/{camera_id}/snapshot", dependencies=[Depends(camera)])
+    async def camera_snapshot(camera_id: int, request: Request):
+        if int(request.headers.get("content-length") or 0) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "Photo is too large")
+        raw = await request.body()
+        if len(raw) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "Photo is too large")
+        # Counting calls the vision model; run it off the event loop.
+        return await asyncio.to_thread(cams.ingest, camera_id, raw)
 
     # --- staff (cleaners / floor staff): cleaning + issues only ---
     @app.get("/api/staff/overview", dependencies=[Depends(staff)])
@@ -466,6 +489,26 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
     def admin_issue(body: IssueIn):
         return fac.report_issue(body.title, body.description, body.severity, body.asset_id,
                                 body.reported_by, source="owner", take_out_of_service=body.take_out_of_service)
+
+    @app.get("/api/admin/cameras", dependencies=[Depends(admin)])
+    def cameras_state():
+        return {"mode": cams.mode(), "cameras": cams.list_cameras()}
+
+    @app.post("/api/admin/cameras", dependencies=[Depends(admin)])
+    def add_camera(body: CameraIn):
+        return cams.add_camera(body.name, body.skus, body.asset_id)
+
+    @app.put("/api/admin/cameras/mode", dependencies=[Depends(admin)])
+    def camera_mode(body: ModeIn):
+        return {"mode": cams.set_mode(body.mode)}
+
+    @app.get("/api/admin/cameras/snapshots/{sid}/image", dependencies=[Depends(admin)])
+    def camera_image(sid: int):
+        return FileResponse(cams.image_path(sid), media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/admin/cameras/counts/{cid}/accept", dependencies=[Depends(admin)])
+    def accept_camera_count(cid: int):
+        return cams.accept_count(cid)
 
     @app.get("/api/admin/stockroom", dependencies=[Depends(admin)])
     def stockroom_state():

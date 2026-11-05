@@ -150,6 +150,33 @@ CREATE TABLE IF NOT EXISTS issues (
   resolution TEXT,
   triage_note TEXT
 );
+-- Cooler / shelf cameras: photos in, shelf counts out (vision), reconciled against the system.
+CREATE TABLE IF NOT EXISTS cameras (
+  id INTEGER PRIMARY KEY,
+  name TEXT UNIQUE NOT NULL,
+  asset_id INTEGER REFERENCES assets(id),   -- e.g. the fridge it looks into
+  skus TEXT NOT NULL,                       -- comma-separated SKUs that belong in view
+  active INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS camera_snapshots (
+  id INTEGER PRIMARY KEY,
+  camera_id INTEGER NOT NULL REFERENCES cameras(id),
+  ts TEXT NOT NULL,
+  image_path TEXT,                          -- NULL once pruned by retention
+  status TEXT NOT NULL DEFAULT 'stored',    -- stored | counted | unusable | error
+  note TEXT                                 -- why not counted, or the vision model's remark (untrusted)
+);
+CREATE TABLE IF NOT EXISTS camera_counts (
+  id INTEGER PRIMARY KEY,
+  snapshot_id INTEGER NOT NULL REFERENCES camera_snapshots(id),
+  camera_id INTEGER NOT NULL REFERENCES cameras(id),
+  ts TEXT NOT NULL,
+  sku TEXT NOT NULL,
+  counted INTEGER NOT NULL,
+  system INTEGER NOT NULL,                  -- shelf count the system had at that moment
+  confidence TEXT NOT NULL,                 -- low | medium | high
+  action TEXT NOT NULL                      -- match | pending | flagged | applied | accepted | low_confidence
+);
 -- Audit trail of everything the agent (or staff) changed.
 CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY,
