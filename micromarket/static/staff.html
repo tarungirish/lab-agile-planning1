@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow"><title>Micromarket Staff</title>
+<link rel="stylesheet" href="/assets/common.css"></head><body>
+<header><h1>🧹 Micromarket — Staff</h1></header>
+<main>
+<div class="card" id="login" style="max-width:420px;margin:auto"><h3>Staff login</h3>
+  <input id="tok" type="password" placeholder="Staff code">
+  <button class="p" style="margin-top:12px;width:100%" onclick="load(true)">Sign in</button><p class="msg err" id="lerr"></p></div>
+<div id="app" class="hide">
+  <div class="tabs"><button id="t-c" class="on" onclick="tab('c')">Cleaning</button><button id="t-i" onclick="tab('i')">Issues</button></div>
+  <div id="p-c"><div class="card"><h3>Cleaning checklist</h3><div id="clean"></div></div></div>
+  <div id="p-i" class="hide">
+    <div class="card" style="margin-bottom:16px"><h3>Report a problem</h3>
+      <input id="it" placeholder="What's wrong?" style="margin-bottom:10px">
+      <input id="id" placeholder="Details (optional)" style="margin-bottom:10px">
+      <div class="row"><select id="ia" style="flex:1"></select><select id="is"><option>low</option><option selected>normal</option><option>high</option></select></div>
+      <div class="row"><span class="msg" id="imsg"></span><button class="p" onclick="report()">Send</button></div></div>
+    <div class="card"><h3>Open issues</h3><div id="issues"></div></div></div>
+</div></main>
+<div class="scrim hide" id="scrim"><div class="card modal"><h3 id="mt"></h3><input id="mi"><p class="msg err" id="me"></p>
+  <div class="row"><button onclick="closeM(null)">Cancel</button><button class="p" onclick="closeM(document.getElementById('mi').value)">Confirm</button></div></div></div>
+<script src="/assets/common.js"></script>
+<script>
+let token='';authHeaders=()=>({'X-Admin-Token':token});
+const get=k=>{try{return localStorage.getItem(k)||''}catch(e){return ''}},put=(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}};
+const ago=ts=>{if(!ts)return 'never';const h=(Date.now()-new Date(ts.replace(' ','T')+'Z'))/36e5;return h<1?Math.max(1,Math.round(h*60))+' min ago':h<48?Math.round(h)+' h ago':Math.round(h/24)+' d ago'};
+const SEV={low:'',normal:'',high:'warn',critical:'bad'};
+function tab(t){for(const k of['c','i']){$('p-'+k).classList.toggle('hide',k!==t);$('t-'+k).classList.toggle('on',k===t)}}
+async function load(login){if(login)token=$('tok').value;
+  try{const d=await api('/api/staff/overview');$('login').classList.add('hide');$('app').classList.remove('hide');
+   $('clean').innerHTML=d.cleaning.map(c=>{const cls=c.status==='overdue'?'bad':c.status==='due_soon'?'warn':'';
+     const label=c.status==='overdue'?(c.last_done?'Overdue '+Math.round(c.hours_overdue)+' h':'Not done yet'):c.status==='due_soon'?'Due soon':'Done';
+     return `<div class="task"><div><b>${esc(c.name)}</b><br><span class="msg">${esc(c.area)} · last: ${c.last_done?ago(c.last_done)+' by '+esc(c.last_by):'never'}</span></div>
+       <div style="display:flex;gap:10px;align-items:center"><span class="pill ${cls}">${label}</span><button class="p" onclick="done(${c.id},${js(c.name)})">Mark done</button></div></div>`}).join('')||'<p class="msg">No cleaning tasks set up.</p>';
+   $('ia').innerHTML='<option value="">Not about specific equipment</option>'+d.assets.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join('');
+   $('issues').innerHTML=d.issues.map(i=>`<div class="task"><div><b>${esc(i.title)}</b> <span class="pill ${SEV[i.severity]}">${i.severity}</span><br>
+     <span class="msg">${esc(i.asset||'General')} · ${ago(i.ts)} · ${i.status.replace('_',' ')}${i.description?' — '+esc(i.description):''}</span>${i.triage_note?`<br><span class="msg">🤖 ${esc(i.triage_note.split('\n').pop())}</span>`:''}</div>
+     <div style="display:flex;gap:8px">${i.status==='open'?`<button onclick="upd(${i.id},'in_progress')">Start</button>`:''}<button class="p" onclick="resolve(${i.id})">Resolve</button></div></div>`).join('')||'<p class="msg">No open issues. 🎉</p>'}
+  catch(e){$('lerr').textContent=e.message}}
+async function done(id,name){let who=get('who');const v=await prompt2('Mark “'+name+'” as done','Your name',"text");
+  if(v===null)return;who=v.trim()||who;if(!who)return;put('who',who);
+  try{await post(`/api/staff/cleaning/${id}/done`,{done_by:who})}catch(e){await prompt2('Could not save','','text',e.message,true)}load()}
+async function upd(id,status,resolution){try{await api('/api/staff/issues/'+id,{method:'PUT',body:JSON.stringify({status,resolution})})}catch(e){await prompt2('Could not update','','text',e.message,true)}load()}
+async function resolve(id){const v=await prompt2('How was it fixed?','Short note (optional)');if(v!==null)upd(id,'resolved',v.trim()||null)}
+async function report(){const m=$('imsg');m.className='msg';m.textContent='';const title=$('it').value.trim();if(title.length<3){m.textContent='Say what is wrong.';return}
+  try{await post('/api/staff/issues',{title,description:$('id').value.trim()||null,severity:$('is').value,asset_id:$('ia').value?parseInt($('ia').value):null,reported_by:get('who')||null});
+   $('it').value=$('id').value='';m.textContent='Reported. Thank you.';load()}catch(e){m.className='msg err';m.textContent=e.message}}
+setInterval(()=>{if(!$('app').classList.contains('hide'))load()},60000);
+</script></body></html>
