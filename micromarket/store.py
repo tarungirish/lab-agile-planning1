@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import sqlite3
-import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 
@@ -25,9 +24,10 @@ class Policy:
 
 
 class Store:
-    def __init__(self, conn: sqlite3.Connection, policy: Policy | None = None):
+    def __init__(self, conn, policy: Policy | None = None):
         self.db = conn
-        self._lock = threading.RLock()  # one connection is shared by request threads + scheduler
+        # The Database's re-entrant lock: held for a whole transaction, and by every single statement.
+        self._lock = conn.lock
         self.policy = policy or Policy()
 
     # ---- helpers -------------------------------------------------------

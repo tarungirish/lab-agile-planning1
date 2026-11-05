@@ -13,7 +13,19 @@ Anthropic's [Project Vend](https://www.anthropic.com/research/project-vend-1).
 - **Auto-ordering** (`micromarket/autoorder.py`): per-product reorder rules (par level, pack size, lead time, supplier). A planner turns sales velocity and current/on-order stock into an explained order plan. Modes: Off / Suggest (owner approves) / Auto (hourly background job).
 - **AI shopkeeper** (`micromarket/agent.py`): Claude with tools to read inventory/sales, reprice, order stock, and keep a notes scratchpad.
 
-## Run it
+## Try the prototype (one command)
+
+```bash
+pip install -r requirements.txt
+python -m micromarket.demo          # builds demo data and prints the URLs + random access codes
+```
+
+* Opens a fresh demo database with two weeks of history: sales, EV charging, cleaning logs, tickets, and a stockroom that needs restocking.
+* Binds to localhost only and generates random owner/staff codes each run (`--host 0.0.0.0` to expose it on your network, `--port`, `--keep` to reuse the previous demo database).
+* **No API key needed.** Without `ANTHROPIC_API_KEY` the shopkeeper is a clearly-labelled *scripted* stand-in: not an AI model, but it drives the real tools, permissions and guardrails, so every screen works. Set the key and it uses the real Claude model automatically (`--scripted` forces the stand-in).
+* Things to try: buy something and watch stock fall; ask the shopkeeper about the cold brew; on `/owner` click **Run agent**, then **Auto-order → Run plan**, then **Stockroom → All done**; on `/staff` sign off a cleaning task.
+
+## Run it (real setup)
 
 ```bash
 pip install -r requirements.txt
@@ -99,3 +111,13 @@ Charger hardware integration (OCPP) so kWh comes from the meter instead of being
 - The same lockout and fail-closed behaviour applies to the staff token. If neither `STAFF_TOKEN` nor `ADMIN_TOKEN` is set, `/api/staff/*` is disabled.
 - Give cleaners the staff code only. The staff page asks who is signing off each task, and remembers the name on that device.
 - Not built yet: photo evidence for cleaning, fridge temperature logging, maintenance schedules (e.g. filter changes), notifications for overdue tasks.
+
+## Known issues (from the security review)
+
+Three Medium findings are open; fix them before putting this in front of the public:
+
+1. Customer chat's `list_inventory` returns wholesale cost, which the kiosk deliberately hides.
+2. Customer-written text (`add_note`, ticket text) flows unmarked into the privileged manager agent's context (indirect prompt injection; bounded by the code guardrails).
+3. Staff can resolve an owner-raised critical issue, which brings a faulty EV charger back into service.
+
+The prototype also has no payment verification: any checkout is recorded as paid.

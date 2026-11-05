@@ -12,6 +12,7 @@
     <input id="tok" type="password" placeholder="Admin token (blank if none set)">
     <button class="p" style="margin-top:12px;width:100%" onclick="loadAdmin()">Open dashboard</button><p class="msg err" id="lerr"></p></div>
   <div id="dash" class="hide">
+    <p class="msg err" id="derr" role="alert"></p>
     <div class="tabs" id="tabs"></div>
     <div id="p-over">
       <div class="stats" id="stats"></div>
@@ -66,7 +67,7 @@ function tab(t){tabNow=t;for(const[k]of TABS)$('p-'+k).classList.toggle('hide',k
 function drawTabs(){$('tabs').innerHTML=TABS.map(([k,l])=>`<button class="${k===tabNow?'on':''}" onclick="tab('${k}')">${l}</button>`).join('')}
 /* ---- owner ---- */
 async function loadAdmin(){token=$('tok').value||token;
-  try{await api('/api/admin/ping');const [s,inv,rs,sales,audit,ct,cs,ao,sr,fc]=await Promise.all(['summary','products','restocks','sales','audit','charging/trends?days='+$('cdays').value,'charging/sessions','autoorder','stockroom','facilities'].map(p=>api('/api/admin/'+p)));
+  try{await api('/api/admin/ping');$('derr').textContent='';const [s,inv,rs,sales,audit,ct,cs,ao,sr,fc]=await Promise.all(['summary','products','restocks','sales','audit','charging/trends?days='+$('cdays').value,'charging/sessions','autoorder','stockroom','facilities'].map(p=>api('/api/admin/'+p)));
    $('login').classList.add('hide');$('dash').classList.remove('hide');tab(tabNow);
    const card=(k,v)=>`<div class="card"><span class="msg">${k}</span><b>${v}</b></div>`;
    $('stats').innerHTML=[['Cash',money(s.cash_cents)],['Revenue',money(s.revenue_cents)],['Gross profit',money(s.gross_profit_cents)],['Sales',s.sales_count],['Low stock',s.low_stock.length]].map(x=>card(...x)).join('');
@@ -128,7 +129,7 @@ async function loadAdmin(){token=$('tok').value||token;
      <td><span class="pill ${ST[a.status]}">${a.status.replace(/_/g,' ')}</span></td><td>${a.open_issues}</td><td><button class="sm" onclick="issueNew(${a.id},'${esc(a.name).replace(/'/g,'')}')">Report issue</button></td></tr>`).join('');
    $('audit').innerHTML='<tr><th>When</th><th>Actor</th><th>Action</th><th>Detail</th></tr>'+audit.map(a=>
      `<tr><td>${esc(a.ts.slice(5,16))}</td><td>${esc(a.actor)}</td><td>${esc(a.action)}</td><td>${esc((a.detail||'').slice(0,100))}</td></tr>`).join('')}
-  catch(e){$('lerr').textContent=e.message}}
+  catch(e){$('lerr').textContent=e.message;$('derr').textContent='Could not refresh the dashboard: '+e.message+'. Showing the last data loaded.'}}
 async function act(f){try{await f()}catch(e){await prompt2('Something went wrong','','text',e.message,true)}await loadAdmin()}
 const order=s=>act(()=>post('/api/admin/restocks',{sku:s,qty:12})),recv=id=>act(()=>post(`/api/admin/restocks/${id}/receive`));
 async function refund(id){const v=await prompt2('Refund sale #'+id+'?','Type YES to confirm');

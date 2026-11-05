@@ -1,6 +1,7 @@
 """SQLite schema and connection helper. All money is stored as integer cents."""
 import os
 import sqlite3
+import threading
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS products (
@@ -157,10 +158,53 @@ CREATE TABLE IF NOT EXISTS audit (
 """
 
 
-def connect(path: str | None = None) -> sqlite3.Connection:
+class _Rows:
+    """Fully-fetched result of one statement (so no cursor is ever shared between threads)."""
+
+    def __init__(self, cur: sqlite3.Cursor):
+        self._rows = cur.fetchall() if cur.description else []
+        self.lastrowid, self.rowcount, self._i = cur.lastrowid, cur.rowcount, 0
+
+    def fetchone(self):
+        if self._i >= len(self._rows):
+            return None
+        self._i += 1
+        return self._rows[self._i - 1]
+
+    def fetchall(self):
+        rest, self._i = self._rows[self._i:], len(self._rows)
+        return rest
+
+    def __iter__(self):
+        return iter(self.fetchall())
+
+
+class Database:
+    """One sqlite3 connection shared by all request threads and the scheduler, fully serialized.
+
+    sqlite3 connections are not safe for concurrent use: overlapping statements raised
+    InterfaceError and returned bogus rows. Every statement runs under `lock`, and Store._tx holds
+    the same (re-entrant) lock for the whole transaction, so other threads never observe or join a
+    half-finished transaction.
+    """
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+        self.lock = threading.RLock()
+
+    def execute(self, sql: str, params=()) -> _Rows:
+        with self.lock:
+            return _Rows(self._conn.execute(sql, params))
+
+    def close(self):
+        with self.lock:
+            self._conn.close()
+
+
+def connect(path: str | None = None) -> Database:
     path = path or os.environ.get("MICROMARKET_DB", "micromarket.db")
     conn = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
-    return conn
+    return Database(conn)
