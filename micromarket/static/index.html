@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Micromarket POS</title>
+<style>
+:root{--bg:#f6f5f1;--card:#fff;--ink:#1d1d1b;--mute:#6b6b66;--acc:#2f6f4f;--bad:#b3261e;--line:#e2e0d8}
+@media (prefers-color-scheme:dark){:root{--bg:#161614;--card:#222220;--ink:#eeede8;--mute:#9a9992;--acc:#6fbf94;--bad:#ff8a80;--line:#34332f}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px system-ui,sans-serif}
+header{display:flex;gap:8px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
+header h1{font-size:18px;margin:0 auto 0 0}
+button{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:8px 14px;border-radius:8px;cursor:pointer}
+button.p{background:var(--acc);color:#fff;border-color:var(--acc)}button.on{border-color:var(--acc);color:var(--acc)}
+button:disabled{opacity:.5}main{padding:16px;max-width:1100px;margin:auto}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+.prod{text-align:left;min-height:96px}.prod b{display:block}.prod span{color:var(--mute);font-size:13px}
+.kiosk{display:grid;grid-template-columns:1fr 320px;gap:16px}@media(max-width:760px){.kiosk{grid-template-columns:1fr}}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:6px 0}
+.msg{color:var(--mute);font-size:14px;min-height:20px}.err{color:var(--bad)}
+textarea,input{font:inherit;width:100%;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+pre{white-space:pre-wrap;margin:0;font:14px/1.45 system-ui}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px}
+.stats b{font-size:22px;display:block}.hide{display:none}h3{margin:0 0 8px}
+</style></head><body>
+<header><h1>🛒 Micromarket</h1>
+<button id="tk" class="on" onclick="tab('kiosk')">Shop</button>
+<button id="ta" onclick="tab('admin')">Owner</button></header>
+<main>
+<section id="kiosk" class="kiosk">
+  <div><div class="grid" id="products"></div>
+    <div class="card" style="margin-top:16px"><h3>Ask the shopkeeper</h3>
+      <input id="cname" placeholder="Your name" style="margin-bottom:8px">
+      <textarea id="cmsg" rows="2" placeholder="Request an item, ask a question…"></textarea>
+      <div class="row"><span class="msg" id="creply"></span><button onclick="ask()">Send</button></div></div></div>
+  <div class="card"><h3>Cart</h3><div id="cart"></div>
+    <div class="row"><b>Total</b><b id="total">$0.00</b></div>
+    <input id="who" placeholder="Name (optional)" style="margin:8px 0">
+    <button class="p" style="width:100%" id="pay" onclick="pay()">Pay</button>
+    <p class="msg" id="paymsg"></p></div>
+</section>
+<section id="admin" class="hide">
+  <div class="card" id="login" style="max-width:360px"><h3>Owner login</h3>
+    <input id="tok" type="password" placeholder="Admin token (blank if none set)">
+    <button class="p" style="margin-top:8px" onclick="loadAdmin()">Open dashboard</button><p class="msg err" id="lerr"></p></div>
+  <div id="dash" class="hide">
+    <div class="stats" id="stats"></div>
+    <div class="card" style="margin-bottom:16px"><h3>🤖 Shopkeeper agent</h3>
+      <textarea id="task" rows="2" placeholder="Optional instruction. Leave blank for a routine review."></textarea>
+      <div class="row"><span class="msg" id="amsg"></span><button class="p" id="arun" onclick="runAgent()">Run agent</button></div>
+      <pre id="areport"></pre></div>
+    <div class="card" style="margin-bottom:16px"><h3>Inventory</h3><table id="inv"></table></div>
+    <div class="card" style="margin-bottom:16px"><h3>Restock orders</h3><table id="rs"></table></div>
+    <div class="card" style="margin-bottom:16px"><h3>Recent sales</h3><table id="sales"></table></div>
+    <div class="card"><h3>Audit log</h3><table id="audit"></table></div>
+  </div>
+</section></main>
+<script>
+const $=id=>document.getElementById(id),money=c=>'$'+(c/100).toFixed(2);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let products=[],cart={},token='';
+function tab(t){for(const x of['kiosk','admin']){$(x).classList.toggle('hide',x!==t);$('t'+x[0]).classList.toggle('on',x===t)}}
+async function api(path,opt={}){const r=await fetch(path,{...opt,headers:{'Content-Type':'application/json','X-Admin-Token':token,...opt.headers}});
+  const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||j.detail||r.statusText);return j}
+const post=(p,b)=>api(p,{method:'POST',body:JSON.stringify(b||{})});
+async function loadProducts(){products=await api('/api/products');
+  $('products').innerHTML=products.map(p=>`<button class="card prod" ${p.stock?'':'disabled'} onclick="add('${esc(p.sku)}')">
+   <b>${esc(p.name)}</b>${money(p.price_cents)}<br><span>${p.stock?p.stock+' left':'Sold out'}</span></button>`).join('')}
+function add(s){const p=products.find(x=>x.sku===s);if((cart[s]||0)<p.stock){cart[s]=(cart[s]||0)+1;draw()}}
+function rm(s){if(--cart[s]<=0)delete cart[s];draw()}
+function draw(){let t=0;$('cart').innerHTML=Object.entries(cart).map(([s,q])=>{const p=products.find(x=>x.sku===s);t+=p.price_cents*q;
+  return`<div class="row"><span>${esc(p.name)} × ${q}</span><button onclick="rm('${esc(s)}')">−</button></div>`}).join('')||'<p class="msg">Tap an item to add it.</p>';
+  $('total').textContent=money(t);$('pay').disabled=!t}
+async function pay(){const m=$('paymsg');m.className='msg';m.textContent='';
+  try{const s=await post('/api/checkout',{items:Object.entries(cart).map(([sku,qty])=>({sku,qty})),customer:$('who').value||null});
+   cart={};draw();m.textContent=`Paid ${money(s.total_cents)} — receipt #${s.id}. Thanks!`}
+  catch(e){m.className='msg err';m.textContent=e.message}await loadProducts()}
+async function ask(){const n=$('cname').value.trim(),b=$('cmsg').value.trim();if(!n||!b){$('creply').textContent='Add your name and a message.';return}
+  $('creply').textContent='Thinking…';try{const r=await post('/api/messages',{customer:n,body:b});$('cmsg').value='';
+   $('creply').textContent=r.reply||'Message received — the owner will follow up.'}catch(e){$('creply').textContent=e.message}}
+async function loadAdmin(){token=$('tok').value;
+  try{const [s,inv,rs,sales,audit]=await Promise.all(['summary','products','restocks','sales','audit'].map(p=>api('/api/admin/'+p)));
+   $('login').classList.add('hide');$('dash').classList.remove('hide');
+   $('stats').innerHTML=[['Cash',money(s.cash_cents)],['Revenue',money(s.revenue_cents)],['Gross profit',money(s.gross_profit_cents)],['Sales',s.sales_count],['Low stock',s.low_stock.length]]
+     .map(([k,v])=>`<div class="card"><span class="msg">${k}</span><b>${v}</b></div>`).join('');
+   $('inv').innerHTML='<tr><th>SKU</th><th>Name</th><th>Price</th><th>Cost</th><th>Stock</th><th></th></tr>'+inv.map(p=>
+     `<tr><td>${esc(p.sku)}</td><td>${esc(p.name)}</td><td>${money(p.price_cents)}</td><td>${money(p.cost_cents)}</td>
+      <td ${p.stock<=p.reorder_point?'class="err"':''}>${p.stock}</td><td><button onclick="order('${esc(p.sku)}')">Order 12</button></td></tr>`).join('');
+   $('rs').innerHTML='<tr><th>#</th><th>Item</th><th>Qty</th><th>Unit cost</th><th>Status</th><th></th></tr>'+rs.map(r=>
+     `<tr><td>${r.id}</td><td>${esc(r.name)}</td><td>${r.qty}</td><td>${money(r.unit_cost_cents)}</td><td>${r.status}</td>
+      <td>${r.status==='pending'?`<button onclick="recv(${r.id})">Mark received</button>`:''}</td></tr>`).join('');
+   $('sales').innerHTML='<tr><th>#</th><th>When</th><th>Items</th><th>Total</th><th></th></tr>'+sales.map(x=>
+     `<tr><td>${x.id}</td><td>${esc(x.ts)}</td><td>${x.items.map(i=>esc(i.name)+'×'+i.qty).join(', ')}</td><td>${money(x.total_cents)}</td>
+      <td>${x.status==='completed'?`<button onclick="refund(${x.id})">Refund</button>`:'refunded'}</td></tr>`).join('');
+   $('audit').innerHTML='<tr><th>When</th><th>Actor</th><th>Action</th><th>Detail</th></tr>'+audit.map(a=>
+     `<tr><td>${esc(a.ts)}</td><td>${esc(a.actor)}</td><td>${esc(a.action)}</td><td>${esc((a.detail||'').slice(0,120))}</td></tr>`).join('')}
+  catch(e){$('lerr').textContent=e.message}}
+async function act(f){try{await f()}catch(e){alert(e.message)}await loadAdmin()}
+const order=s=>act(()=>post('/api/admin/restocks',{sku:s,qty:12})),recv=id=>act(()=>post(`/api/admin/restocks/${id}/receive`)),
+ refund=id=>confirm('Refund sale #'+id+'?')&&act(()=>post(`/api/admin/sales/${id}/refund`));
+async function runAgent(){$('arun').disabled=true;$('amsg').textContent='Agent is working…';
+  try{const r=await post('/api/admin/agent/run',{task:$('task').value||null});$('areport').textContent=r.report;$('amsg').textContent=''}
+  catch(e){$('amsg').textContent=e.message}$('arun').disabled=false;loadAdmin()}
+loadProducts();draw();
+</script></body></html>
