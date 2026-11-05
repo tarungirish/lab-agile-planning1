@@ -2,7 +2,7 @@
 
 ## Product summary
 
-Drivers add an **Orchard card** to Apple Wallet or Google Wallet. There is no mobile app. When a driver taps the card at a charger, the charging session starts and the driver gets a **text message** asking whether they want club (lounge) access. Replying **YES** adds a club fee to the session. The payment method on file is charged **only after the charging session completes**.
+Drivers add an **Orchard card** to Apple Wallet or Google Wallet. There is no mobile app. When a driver taps the card at a charger, the charging session starts and the driver gets a **text message** asking whether they want club (lounge) access. Replying **YES** adds a club fee to the session. Every account holds a **prepaid balance** (a preload) that the driver tops up through a Stripe payment link sent by text. Charges are deducted from the balance **only after the charging session completes**.
 
 | User type | Club fee |
 |-----------|----------|
@@ -16,16 +16,17 @@ Each account is identified by the driver's **mobile phone number** (one number, 
 ## Core flow
 
 1. Driver taps the Orchard card (wallet pass) at the charger.
-2. Backend identifies the account and starts the charging session.
+2. Backend identifies the account and checks the prepaid balance. If it is below the minimum, the tap is declined and the driver is texted a top-up link (see story 10). Otherwise the charging session starts.
 3. Driver receives a text: "Would you like to use the club? Reply YES for $X."
 4. Driver replies YES (club added) or NO / no reply (no club).
 5. Charging session completes.
-6. Payment method on file is charged for charging plus the club fee, if accepted.
+6. The session total (club fee if accepted, plus charging if Orchard bills it) is deducted from the prepaid balance.
 7. Driver receives a text and email receipt.
 
 ## Decisions
 
-* **Payments:** Stripe. The payment method is saved at signup (Stripe SetupIntent) for off-session use, and charged after the session completes.
+* **Payments:** Stripe, used for preloads. Accounts hold a prepaid balance, and a top-up is triggered by text message with a Stripe-hosted payment link. The balance is credited only after Stripe confirms the payment (webhook), and is deducted after the session completes.
+* **Balance ledger:** Orchard keeps a ledger per account (top-ups, deductions, adjustments, refunds). The balance is never edited directly; every change is a ledger entry.
 * **Club access:** The driver uses the same Orchard digital card (wallet pass) to enter the club. Access is granted for the visit once they accept the offer.
 * **Door reader:** An NFC reader at the club entrance reads the Orchard pass. The pass carries only an ID; the reader (or its controller) asks Orchard's backend whether that ID has active club access, and unlocks the door on approval.
 * **Offer expiry:** The club offer is valid only while the charging session is in progress. When the session completes, the offer expires and a late YES is rejected.
@@ -49,7 +50,10 @@ To confirm in the build agreement and spec:
 * Apple and Google must approve Orchard for NFC-enabled passes (Apple VAS / NFC pass entitlement, Google Smart Tap). Start the applications early; this gates both the chargers and the door reader.
 * Which door reader hardware/vendor, and does it support Apple VAS and Google Smart Tap?
 * Does club access last for the whole visit or end when the charging session ends?
-* What happens if the session ends with the charge failing (retry schedule, club access revoked)?
+* Preload rules: minimum balance to start a session, preload amounts, and whether the driver can opt in to auto-reload from a saved card.
+* Refunds and expiry: can unused balance be refunded, and does it expire?
+* Legal review of stored-value rules (gift card/stored-value, unclaimed property, refund requirements) before launch.
+* What happens when a session costs more than the balance (negative balance, block future sessions)?
 * Text opt-in/opt-out compliance (TCPA) and STOP handling.
 
 ---
@@ -63,14 +67,14 @@ To confirm in the build agreement and spec:
 **So that** I can tap to start charging without installing an app
 
 #### Details and Assumptions
-* Issued from a web signup page; collects name, mobile number, email, payment method, and optional fleet code.
+* Issued from a web signup page; collects name, mobile number, email, and optional fleet code. The first preload can happen at signup or by the text link on the first tap.
 * The phone number is the account identifier and must be unique. It is verified with a one-time text code before the pass is issued.
 * The pass contains an identifier only, no card data.
 
 #### Acceptance Criteria
 
 ```gherkin
-Given I have completed signup with a valid phone number and payment method
+Given I have completed signup with a verified phone number
 When I choose "Add to Apple Wallet" or "Add to Google Wallet"
 Then the Orchard card appears in my wallet and my account is active
 ```
@@ -84,6 +88,7 @@ Then the Orchard card appears in my wallet and my account is active
 #### Details and Assumptions
 * Backend receives a "pass tapped at charger X" event (via Electric Era) and looks up the account by pass ID / phone number.
 * Unknown or suspended accounts do not start a session.
+* The balance must be at or above the minimum to start (amount to be decided, see open questions); otherwise the tap is declined and a top-up text is sent.
 
 #### Acceptance Criteria
 
@@ -133,6 +138,7 @@ Then the price shown is $3
 * Replies are case-insensitive; unrecognized replies get a help message.
 * No charge is made at the time of reply.
 * Accepting marks the Orchard card as club-eligible for this visit.
+* Assumption: a YES is accepted only if the balance can cover the club fee. Otherwise the reply includes a top-up link, and the offer stays open until the session ends.
 
 #### Acceptance Criteria
 
@@ -146,28 +152,28 @@ When I reply "NO" or do not reply
 Then no club fee is added to my session
 ```
 
-### 5. Charge after the session completes
+### 5. Deduct from balance after the session completes
 
 **As a** driver
-**I need** to be charged only after my charging session ends
+**I need** the session cost taken from my balance only after my charging session ends
 **So that** I pay for what I actually used
 
 #### Details and Assumptions
-* Charge uses the Stripe payment method saved on the account, as an off-session payment.
-* Use an idempotency key per session so a repeated event never double-charges.
+* The deduction is a ledger entry against the prepaid balance; no card is charged at this point.
+* Use an idempotency key per session so a repeated event never deducts twice.
 * Total = charging cost + club fee (if accepted).
-* Failed payments are flagged on the dashboard for follow-up.
+* If the cost exceeds the balance, the account goes negative or the shortfall is recorded; the dashboard flags it and the driver is texted a top-up link (policy to be decided).
 
 #### Acceptance Criteria
 
 ```gherkin
 Given my charging session has completed
 When the system processes the payment
-Then my payment method is charged once for the session total, including the club fee if I accepted
+Then my balance is reduced once by the session total, including the club fee if I accepted
 
 Given my session is still in progress
 When I have accepted the club offer
-Then my payment method has not been charged yet
+Then my balance has not been reduced yet
 ```
 
 ### 6. Receipt by text and email
@@ -179,9 +185,9 @@ Then my payment method has not been charged yet
 #### Acceptance Criteria
 
 ```gherkin
-Given my payment has been processed
+Given my session total has been deducted
 When the session is finalized
-Then I receive a text with the total and an email with an itemized receipt
+Then I receive a text with the total and remaining balance, and an email with an itemized receipt
 ```
 
 ### 7. Enter the club with the Orchard card
@@ -244,4 +250,50 @@ Then the failed payment is visible with the account and session details
 Given I receive a text from Orchard
 When I reply "STOP"
 Then I receive no further texts and the dashboard shows my opt-out
+```
+
+### 10. Preload funds by text
+
+**As a** driver
+**I need** to add money to my Orchard balance using a link sent by text
+**So that** I can charge and use the club without an app
+
+#### Details and Assumptions
+* A text with a Stripe-hosted payment link is sent when the balance is below the minimum, or when the driver replies "ADD" or "TOPUP".
+* The link is single-use, tied to the account, and expires after a short time.
+* The balance is credited only when Stripe confirms payment (webhook), using the Stripe payment ID as the idempotency key.
+* A confirmation text states the new balance.
+
+#### Acceptance Criteria
+
+```gherkin
+Given my balance is below the minimum
+When I tap my card at a charger
+Then I receive a text with a link to add funds
+
+Given I open the link and pay successfully
+When Stripe confirms the payment
+Then my balance increases by the amount paid and I receive a confirmation text with the new balance
+
+Given the same Stripe payment is reported twice
+When the system processes the second report
+Then my balance is only credited once
+```
+
+### 11. Decline taps when the balance is too low
+
+**As an** Orchard operator
+**I need** taps to be declined when the balance is below the minimum
+**So that** drivers cannot start sessions we cannot collect payment for
+
+#### Details and Assumptions
+* Applies to charger taps. The club door is governed by the accepted offer (story 7).
+* The decline reason is returned to Electric Era's system and shown to staff in the dashboard.
+
+#### Acceptance Criteria
+
+```gherkin
+Given my balance is below the minimum
+When I tap my card at a charger
+Then the session does not start and I receive a text with a top-up link
 ```
