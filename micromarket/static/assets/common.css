@@ -37,3 +37,9 @@ th{color:var(--mute);font-weight:500;font-size:14px}
 .cc{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px}
 .pill{font-size:13px;padding:2px 10px;border-radius:99px;background:var(--acc2);color:var(--acc)}.pill.x{background:transparent;border:1px solid var(--line);color:var(--mute)}
 @media(max-width:759px){.shop{grid-template-columns:1fr}.cart{position:static}main{padding:14px}}
+.pill.bad{background:transparent;border:1px solid var(--bad);color:var(--bad)}
+.pill.warn{background:transparent;border:1px solid #b7791f;color:#b7791f}
+@media (prefers-color-scheme:dark){.pill.warn{border-color:#e0b25a;color:#e0b25a}}
+.task{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid var(--line)}
+.task:last-child{border-bottom:0}.task b{font-size:18px}
+select{min-height:48px}

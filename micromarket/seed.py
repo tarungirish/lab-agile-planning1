@@ -2,6 +2,7 @@
 from .db import connect
 from .autoorder import AutoOrder
 from .charging import Charging
+from .facilities import Facilities
 from .store import Store
 
 ITEMS = [  # sku, name, price, cost, stock, reorder
@@ -27,6 +28,16 @@ if __name__ == "__main__":
         c = Charging(s)
         c.add_charger("Lot A1", 7.4, "lot"); c.add_charger("Lot A2", 11, "lot")
         c.add_charger("Lounge 1", 22, "lounge"); c.add_charger("Lounge 2", 22, "lounge")
+        f = Facilities(s)
+        for name, hours, area in [("Wipe shelves and fridge handles", 24, "market"), ("Empty bins", 12, "market"),
+                                  ("Wipe kiosk screen", 8, "market"), ("Clean lounge seating and tables", 24, "lounge"),
+                                  ("Wipe charger handles and cables", 72, "lounge"), ("Deep clean fridge interior", 168, "market")]:
+            f.add_task(name, hours, area)
+        for name, kind, loc in [("Fridge 1", "fridge", "market"), ("Fridge 2", "fridge", "market"),
+                                ("Kiosk iPad", "kiosk", "market"), ("Lounge seating", "furniture", "lounge")]:
+            f.add_asset(name, kind, loc)
+        for ch in c.list_chargers():
+            f.add_asset(f"{ch['name']} charger", "charger", ch["location"], charger_id=ch["id"])
         print("Seeded", len(ITEMS), "products and $200.00 starting cash")
     else:
         print("Database already has products; skipping")

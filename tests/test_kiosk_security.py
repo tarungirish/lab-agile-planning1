@@ -26,7 +26,7 @@ def test_kiosk_page_has_no_owner_ui_or_code():
     assert "/api/admin" not in blob
     # No owner UI, owner-only functions, admin header, or links to the owner URL.
     # (Friendly copy such as "the owner will follow up" is fine.)
-    for marker in ("loadAdmin", "runAgent", 'id="admin"', "X-Admin-Token", 'href="/owner'):
+    for marker in ("loadAdmin", "runAgent", 'id="admin"', "X-Admin-Token", 'href="/owner', "api/staff", 'href="/staff'):
         assert marker not in blob, marker
 
 

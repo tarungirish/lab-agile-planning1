@@ -106,6 +106,46 @@ CREATE TABLE IF NOT EXISTS transfers (
   qty INTEGER NOT NULL CHECK (qty > 0),
   status TEXT NOT NULL DEFAULT 'pending'  -- pending | completed | cancelled
 );
+-- Cleaning tracker
+CREATE TABLE IF NOT EXISTS cleaning_tasks (
+  id INTEGER PRIMARY KEY,
+  name TEXT UNIQUE NOT NULL,
+  area TEXT NOT NULL DEFAULT 'general',
+  frequency_hours REAL NOT NULL CHECK (frequency_hours > 0),
+  instructions TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS cleaning_logs (
+  id INTEGER PRIMARY KEY,
+  task_id INTEGER NOT NULL REFERENCES cleaning_tasks(id),
+  ts TEXT NOT NULL,
+  done_by TEXT NOT NULL,
+  notes TEXT
+);
+-- Facilities tracker: equipment register + issue tickets
+CREATE TABLE IF NOT EXISTS assets (
+  id INTEGER PRIMARY KEY,
+  name TEXT UNIQUE NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'equipment',
+  location TEXT NOT NULL DEFAULT 'market',
+  status TEXT NOT NULL DEFAULT 'ok',      -- ok | needs_attention | out_of_service
+  charger_id INTEGER REFERENCES chargers(id),
+  notes TEXT
+);
+CREATE TABLE IF NOT EXISTS issues (
+  id INTEGER PRIMARY KEY,
+  asset_id INTEGER REFERENCES assets(id),
+  title TEXT NOT NULL,
+  description TEXT,
+  severity TEXT NOT NULL DEFAULT 'normal',  -- low | normal | high | critical
+  status TEXT NOT NULL DEFAULT 'open',      -- open | in_progress | resolved
+  reported_by TEXT,
+  source TEXT NOT NULL DEFAULT 'owner',     -- kiosk | owner | staff | agent | customer-chat
+  ts TEXT NOT NULL,
+  resolved_at TEXT,
+  resolution TEXT
+);
 -- Audit trail of everything the agent (or staff) changed.
 CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY,

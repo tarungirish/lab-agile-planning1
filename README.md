@@ -5,6 +5,9 @@ Anthropic's [Project Vend](https://www.anthropic.com/research/project-vend-1).
 
 - **Kiosk** (`/`, public): product grid, cart, checkout, EV charger start, and a "message the shopkeeper" box. Contains no owner UI or code and resets itself after 90 s idle.
 - **Owner dashboard** (separate URL, `/owner` by default; set `OWNER_PATH` to change it; needs `ADMIN_TOKEN`): cash/revenue/profit, inventory, restock orders, sales + refunds, audit log, and a button to run the AI agent.
+- **Cleaning tracker** (`micromarket/facilities.py`): recurring cleaning tasks with a frequency; status is ok / due soon / overdue (never done counts as overdue), who cleaned what and when, and an on-time rate over the last 14 days (only counts the time a task has existed).
+- **Facilities tracker**: equipment register plus issue tickets (low/normal/high/critical). Shoppers can report problems from the kiosk. A critical issue marks the equipment out of service; if it's linked to an EV charger, the charger goes offline and comes back when the last open issue is resolved.
+- **Staff page** (`/staff`, `STAFF_TOKEN`): cleaners get just the cleaning checklist and issues, with no access to finances or the owner dashboard.
 - **EV charging** (`micromarket/charging.py`): chargers tagged by location (lot, lounge, …), start/stop sessions, per-kWh billing into the same cash ledger, and usage trends (by hour, day and location, utilization, margin over energy cost, and how often drivers also shop).
 - **Stockroom** (`micromarket/stockroom.py`): we are our own supplier. Vendor deliveries land in the stockroom; shelves (what the kiosk sells) are restocked from it via a pick list. Stock counts for shrink/miscounts.
 - **Auto-ordering** (`micromarket/autoorder.py`): per-product reorder rules (par level, pack size, lead time, supplier). A planner turns sales velocity and current/on-order stock into an explained order plan. Modes: Off / Suggest (owner approves) / Auto (hourly background job).
@@ -18,6 +21,8 @@ python -m micromarket.seed                      # demo products + $200 starting 
 export ANTHROPIC_API_KEY=...                    # needed only for the agent features
 export ADMIN_TOKEN=choose-a-long-random-secret  # REQUIRED for owner access (admin is disabled without it)
 export OWNER_PATH=back-office-7f3               # optional: move the owner page off /owner
+export STAFF_TOKEN=another-long-random-code     # optional: cleaners' login for /staff (owner token also works there)
+export STAFF_PATH=floor-7f3                     # optional: move the staff page off /staff
 uvicorn micromarket.app:create_app --factory
 pytest
 ```
@@ -40,6 +45,9 @@ code (`store.py`, `Policy`), not in the prompt, so no conversation can talk them
 | Runaway auto-ordering | Orders count stock already on order (no double-ordering); the Store itself enforces the per-order cap and cash reserve on `auto` orders; agent can only double a par level per step |
 | Owner access from the public kiosk | Separate owner URL; kiosk page ships no owner code; admin API **fails closed** without `ADMIN_TOKEN`; constant-time token check; 5 bad tokens locks that IP out for 5 min; API docs/schema not published |
 | Chat spam burning model credits | Kiosk messages limited to 5/min per IP |
+| Public abuse of problem reports | Kiosk reports are always "normal" severity, can't take equipment offline, and are limited to 3/min per IP; shoppers see only equipment names |
+| Staff over-reach | `STAFF_TOKEN` only opens `/api/staff/*` (cleaning + issues); staff can't mark issues critical or take equipment offline |
+| Agent over-reach on facilities | Agent can file low/normal/high tickets only; in customer chat it can only pass on a normal-priority complaint |
 | Unaccountable changes | Every agent/staff change is written to an audit log; refunds are staff-only |
 
 Staff actions through the owner API bypass the agent policy but are still logged.
@@ -84,3 +92,10 @@ Charger hardware integration (OCPP) so kWh comes from the meter instead of being
 - Delivered goods go to the stockroom for products with a shelf rule (override with `?to=shelf` on the receive endpoint); products without a shelf rule behave as before (straight to the shelf).
 - Cost basis is a weighted average over everything held (shelf + stockroom).
 - Not built yet: selling to other locations (multi-site), lot/expiry tracking, barcode scanning for counts.
+
+## Cleaning & facilities notes
+
+- Cleaning status is derived from the last log: *due soon* = last quarter of the interval remains; *overdue* = past due or never done.
+- The same lockout and fail-closed behaviour applies to the staff token. If neither `STAFF_TOKEN` nor `ADMIN_TOKEN` is set, `/api/staff/*` is disabled.
+- Give cleaners the staff code only. The staff page asks who is signing off each task, and remembers the name on that device.
+- Not built yet: photo evidence for cleaning, fridge temperature logging, maintenance schedules (e.g. filter changes), notifications for overdue tasks.

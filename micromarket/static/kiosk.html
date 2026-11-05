@@ -11,6 +11,10 @@
     <div class="tiles" id="products"></div>
     <div class="card"><h3>⚡ EV charging <span class="msg" id="cprice"></span></h3>
       <div class="cc" id="chargers"></div><p class="msg" id="cmsg2"></p></div>
+    <div class="card"><h3>Report a problem</h3>
+      <textarea id="ptxt" rows="2" placeholder="Spill, empty fridge, something broken…"></textarea>
+      <div class="row" style="margin-top:10px"><select id="pa" style="flex:1"></select><input id="pname" placeholder="Your name (optional)" style="flex:1"></div>
+      <div class="row"><span class="msg" id="pmsg"></span><button class="p" onclick="reportProblem()">Send</button></div></div>
     <div class="card"><h3>Ask the shopkeeper</h3>
       <input id="cname" placeholder="Your name" style="margin-bottom:10px">
       <textarea id="cmsg" rows="2" placeholder="Request an item, ask a question…"></textarea>
@@ -42,6 +46,10 @@ async function pay(){const m=$('paymsg');m.className='msg';m.textContent='';
   try{const s=await post('/api/checkout',{items:Object.entries(cart).map(([sku,qty])=>({sku,qty})),customer:$('who').value||null});
    cart={};draw();m.textContent=`Paid ${money(s.total_cents)} — receipt #${s.id}. Thanks!`}
   catch(e){m.className='msg err';m.textContent=e.message}await loadProducts()}
+async function loadAssets(){try{const a=await api('/api/assets');$('pa').innerHTML='<option value="">Not sure / something else</option>'+a.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}catch(e){}}
+async function reportProblem(){const m=$('pmsg'),t=$('ptxt').value.trim();m.className='msg';if(t.length<3){m.textContent='Tell us what is wrong.';return}
+  try{await post('/api/issues',{title:t.slice(0,120),description:t.length>120?t.slice(0,500):null,reporter:$('pname').value.trim()||null,asset_id:$('pa').value?parseInt($('pa').value):null});
+   $('ptxt').value='';m.textContent='Thank you! The team has been told.'}catch(e){m.className='msg err';m.textContent=e.message}}
 async function ask(){const n=$('cname').value.trim(),b=$('cmsg').value.trim();if(!n||!b){$('creply').textContent='Add your name and a message.';return}
   $('creply').textContent='Thinking…';try{const r=await post('/api/messages',{customer:n,body:b});$('cmsg').value='';
    $('creply').textContent=r.reply||'Message received — the owner will follow up.'}catch(e){$('creply').textContent=e.message}}
@@ -53,8 +61,8 @@ async function startCharge(id){const m=$('cmsg2');let n=$('who').value.trim();
   try{const s=await post(`/api/chargers/${id}/start`,{customer:n});m.className='msg';m.textContent=`Charging started on ${s.charger} (session #${s.id}). Let the owner know when you unplug.`}
   catch(e){m.className='msg err';m.textContent=e.message}loadChargers()}
 // Public kiosk: wipe cart/names/messages after 90s of no touches so shoppers never see each other's data.
-let idle;const resetIdle=()=>{clearTimeout(idle);idle=setTimeout(()=>{cart={};draw();for(const id of['who','cname','cmsg'])$(id).value='';
-  for(const id of['paymsg','creply','cmsg2'])$(id).textContent='';closeM(null);loadProducts();loadChargers()},90000)};
+let idle;const resetIdle=()=>{clearTimeout(idle);idle=setTimeout(()=>{cart={};draw();for(const id of['who','cname','cmsg','ptxt','pname'])$(id).value='';
+  for(const id of['paymsg','creply','cmsg2','pmsg'])$(id).textContent='';closeM(null);loadProducts();loadChargers()},90000)};
 ['pointerdown','keydown'].forEach(e=>addEventListener(e,resetIdle,{passive:true}));resetIdle();
-loadProducts();loadChargers();draw();setInterval(()=>{if(!Object.keys(cart).length){loadProducts();loadChargers()}},30000);
+loadProducts();loadChargers();loadAssets();draw();setInterval(()=>{if(!Object.keys(cart).length){loadProducts();loadChargers()}},30000);
 </script></body></html>

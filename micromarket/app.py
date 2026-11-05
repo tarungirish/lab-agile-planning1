@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from .agent import Shopkeeper
 from .db import connect
+from .facilities import SEVERITIES
 from .store import Store, StoreError
 
 STATIC = Path(__file__).parent / "static"
@@ -127,6 +128,47 @@ class TransferIn(BaseModel):
     qty: int = Field(gt=0)
 
 
+class PublicIssueIn(BaseModel):
+    title: str = Field(min_length=3, max_length=120)
+    description: str | None = Field(None, max_length=500)
+    reporter: str | None = Field(None, max_length=80)
+    asset_id: int | None = None
+
+
+class IssueIn(BaseModel):
+    title: str = Field(min_length=3, max_length=120)
+    description: str | None = Field(None, max_length=500)
+    severity: str = "normal"
+    asset_id: int | None = None
+    reported_by: str | None = Field(None, max_length=80)
+    take_out_of_service: bool = False
+
+
+class IssueUpdateIn(BaseModel):
+    status: str
+    resolution: str | None = Field(None, max_length=300)
+
+
+class CleanDoneIn(BaseModel):
+    done_by: str = Field(min_length=1, max_length=80)
+    notes: str | None = Field(None, max_length=300)
+
+
+class CleanTaskIn(BaseModel):
+    name: str = Field(min_length=2, max_length=80)
+    frequency_hours: float = Field(gt=0)
+    area: str = "general"
+    instructions: str | None = Field(None, max_length=300)
+
+
+class AssetIn(BaseModel):
+    name: str = Field(min_length=2, max_length=80)
+    kind: str = "equipment"
+    location: str = "market"
+    charger_id: int | None = None
+    notes: str | None = Field(None, max_length=300)
+
+
 class TaskIn(BaseModel):
     task: str | None = Field(None, max_length=2000)
 
@@ -137,6 +179,7 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
     agent = shopkeeper or Shopkeeper(store)
     charging = agent.charging
     auto = agent.autoorder
+    fac = agent.facilities
     room = auto.stockroom
     if auto_order_interval_s is None:
         auto_order_interval_s = float(os.environ.get("AUTO_ORDER_INTERVAL_MIN", "60")) * 60
@@ -158,22 +201,31 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
     # The kiosk is public, so don't publish the API schema (it lists every admin route).
     app = FastAPI(title="Micromarket POS", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     owner_path = "/" + os.environ.get("OWNER_PATH", "owner").strip("/")
+    staff_path = "/" + os.environ.get("STAFF_PATH", "staff").strip("/")
+    issue_limit = RateLimiter(limit=3, window_s=60)       # public problem reports
     chat_limit = RateLimiter(limit=5, window_s=60)        # each message can cost model tokens
     login_fails = RateLimiter(limit=5, window_s=300)      # lock an IP out after 5 bad tokens
 
-    def admin(request: Request, x_admin_token: str | None = Header(None)):
-        expected = os.environ.get("ADMIN_TOKEN")
+    def _authenticate(request: Request, token: str | None, env_names: list[str]):
+        expected = [os.environ[n] for n in env_names if os.environ.get(n)]
         if not expected:
-            # Fail closed: a public kiosk must never expose admin routes by accident.
+            # Fail closed: a public kiosk must never expose private routes by accident.
             if os.environ.get("MICROMARKET_ALLOW_OPEN_ADMIN") == "1":
                 return  # explicit local-dev escape hatch
-            raise HTTPException(503, "Owner access is disabled: set the ADMIN_TOKEN environment variable")
+            raise HTTPException(503, "Access is disabled: set the ADMIN_TOKEN environment variable")
         ip = request.client.host if request.client else "?"
         if login_fails.blocked(ip):
             raise HTTPException(429, "Too many failed attempts. Try again in a few minutes.")
-        if not secrets.compare_digest((x_admin_token or "").encode(), expected.encode()):
+        if not any(secrets.compare_digest((token or "").encode(), e.encode()) for e in expected):
             login_fails.hit(ip)
-            raise HTTPException(401, "Admin token required")
+            raise HTTPException(401, "Access token required")
+
+    def admin(request: Request, x_admin_token: str | None = Header(None)):
+        _authenticate(request, x_admin_token, ["ADMIN_TOKEN"])
+
+    def staff(request: Request, x_admin_token: str | None = Header(None)):
+        # Cleaners/floor staff: STAFF_TOKEN reaches only /api/staff/*; the owner token works there too.
+        _authenticate(request, x_admin_token, ["STAFF_TOKEN", "ADMIN_TOKEN"])
 
     @app.exception_handler(StoreError)
     async def _store_error(_, exc: StoreError):
@@ -214,6 +266,26 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
             reply = None  # message is saved; owner can follow up
         return {"id": mid, "reply": reply}
 
+    @app.get(staff_path, include_in_schema=False)
+    def staff_page():  # cleaners' page: cleaning checklist + issues only
+        return FileResponse(STATIC / "staff.html", headers={
+            "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"})
+
+    @app.get("/api/assets")
+    def public_assets():  # for the kiosk's "report a problem" picker; no status or notes
+        return [{"id": a["id"], "name": a["name"], "location": a["location"]} for a in fac.list_assets()]
+
+    @app.post("/api/issues")
+    def report_problem(body: PublicIssueIn, request: Request):
+        key = request.client.host if request.client else "?"
+        if issue_limit.blocked(key):
+            raise HTTPException(429, "Thanks! Please wait a minute before sending another report.")
+        issue_limit.hit(key)
+        # Public reports are always 'normal' and can never take equipment offline.
+        i = fac.report_issue(body.title, body.description, "normal", body.asset_id,
+                             body.reporter, source="kiosk", actor="kiosk")
+        return {"id": i["id"]}
+
     @app.get("/api/chargers")
     def chargers():
         return {"price_cents_per_kwh": charging.price_cents_per_kwh(),
@@ -224,6 +296,27 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
     def charge_start(charger_id: int, body: StartIn):
         s = charging.start(charger_id, body.customer)
         return {k: s[k] for k in ("id", "charger", "started_at", "price_cents_per_kwh")}
+
+    # --- staff (cleaners / floor staff): cleaning + issues only ---
+    @app.get("/api/staff/overview", dependencies=[Depends(staff)])
+    def staff_overview():
+        return {"cleaning": fac.list_cleaning(), "issues": fac.list_issues(),
+                "assets": [{"id": a["id"], "name": a["name"]} for a in fac.list_assets()]}
+
+    @app.post("/api/staff/cleaning/{task_id}/done", dependencies=[Depends(staff)])
+    def staff_clean_done(task_id: int, body: CleanDoneIn):
+        return fac.log_cleaning(task_id, body.done_by, body.notes)
+
+    @app.post("/api/staff/issues", dependencies=[Depends(staff)])
+    def staff_issue(body: IssueIn):
+        if body.severity == "critical" or body.take_out_of_service:  # taking equipment offline is the owner's call
+            raise HTTPException(403, "Ask the owner to mark an issue critical or take equipment out of service")
+        return fac.report_issue(body.title, body.description, body.severity, body.asset_id,
+                                body.reported_by, source="staff")
+
+    @app.put("/api/staff/issues/{issue_id}", dependencies=[Depends(staff)])
+    def staff_issue_update(issue_id: int, body: IssueUpdateIn):
+        return fac.update_issue(issue_id, body.status, body.resolution)
 
     # --- admin ---
     @app.get("/api/admin/ping", dependencies=[Depends(admin)])
@@ -307,6 +400,30 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
     @app.get("/api/admin/charging/trends", dependencies=[Depends(admin)])
     def charge_trends(days: int = 30):
         return charging.trends(max(1, min(days, 365)))
+
+    @app.get("/api/admin/facilities", dependencies=[Depends(admin)])
+    def facilities_state():
+        return {**fac.summary(), "history": fac.cleaning_history(),
+                "chargers": [{"id": c["id"], "name": c["name"]} for c in auto.stockroom.store.db.execute(
+                    "SELECT id, name FROM chargers ORDER BY name")]}
+
+    @app.post("/api/admin/cleaning-tasks", dependencies=[Depends(admin)])
+    def add_clean_task(body: CleanTaskIn):
+        return fac.add_task(body.name, body.frequency_hours, body.area, body.instructions)
+
+    @app.put("/api/admin/cleaning-tasks/{tid}/active", dependencies=[Depends(admin)])
+    def clean_task_active(tid: int, active: bool):
+        fac.set_task_active(tid, active)
+        return {"ok": True}
+
+    @app.post("/api/admin/assets", dependencies=[Depends(admin)])
+    def add_asset(body: AssetIn):
+        return fac.add_asset(body.name, body.kind, body.location, body.charger_id, body.notes)
+
+    @app.post("/api/admin/issues", dependencies=[Depends(admin)])
+    def admin_issue(body: IssueIn):
+        return fac.report_issue(body.title, body.description, body.severity, body.asset_id,
+                                body.reported_by, source="owner", take_out_of_service=body.take_out_of_service)
 
     @app.get("/api/admin/stockroom", dependencies=[Depends(admin)])
     def stockroom_state():

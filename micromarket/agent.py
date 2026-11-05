@@ -14,6 +14,7 @@ import anthropic
 
 from .autoorder import AutoOrder
 from .charging import Charging
+from .facilities import Facilities
 from .store import Store, StoreError
 
 MODEL = os.environ.get("MICROMARKET_MODEL", "claude-opus-5-5")
@@ -22,6 +23,7 @@ MAX_TURNS = 12
 SYSTEM = """You are the shopkeeper of a small office micromarket (self-checkout shelves and a fridge).
 Your goals: keep popular items in stock, keep prices fair, and stay profitable.
 We are our own supplier: stock sits in a stockroom and shelves are restocked from it; vendor purchases refill the stockroom. Use auto_order_plan to see both.
+You also keep an eye on cleaning and equipment: check facilities_report and open tickets for anything overdue or broken.
 You also oversee the EV chargers (some are in the club lounge): watch usage trends and keep charging priced above energy cost.
 
 Rules:
@@ -80,6 +82,24 @@ _TOOLS = {
             "pack_size": {"type": "integer"}, "lead_time_days": {"type": "number"}},
             "required": ["sku", "par_level"], "additionalProperties": False},
     },
+    "facilities_report": {
+        "description": "Cleaning and facilities status: overdue/due-soon cleaning tasks, 14-day cleaning compliance, open issues by severity, and equipment status. Read-only.",
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    "report_issue": {
+        "description": "Open a facilities ticket (e.g. a fridge running warm). Severity low/normal/high only; taking equipment out of service is the owner's call.",
+        "input_schema": {"type": "object", "properties": {
+            "title": {"type": "string"}, "description": {"type": "string"},
+            "severity": {"type": "string", "enum": ["low", "normal", "high"]},
+            "asset": {"type": "string", "description": "Exact equipment name, optional"}},
+            "required": ["title"], "additionalProperties": False},
+    },
+    "report_problem": {
+        "description": "Pass a customer's complaint (spill, broken equipment) to the owner as a normal-priority ticket.",
+        "input_schema": {"type": "object", "properties": {
+            "title": {"type": "string"}, "description": {"type": "string"}},
+            "required": ["title"], "additionalProperties": False},
+    },
     "add_note": {
         "description": "Save a note to your persistent scratchpad (decisions, observations, to-dos).",
         "input_schema": {
@@ -92,13 +112,14 @@ _TOOLS = {
     },
 }
 MANAGER_TOOLS = list(_TOOLS)
-CUSTOMER_TOOLS = ["list_inventory", "charger_status", "add_note"]
+CUSTOMER_TOOLS = ["list_inventory", "charger_status", "report_problem", "add_note"]
 
 
 class Shopkeeper:
     def __init__(self, store: Store, client: anthropic.Anthropic | None = None, model: str = MODEL):
         self.store = store
         self.charging = Charging(store)
+        self.facilities = Facilities(store)
         self.autoorder = AutoOrder(store)
         self._client = client
         self.model = model
@@ -140,6 +161,21 @@ class Shopkeeper:
             return json.dumps(self.autoorder.set_rule(
                 args["sku"], args["par_level"], args.get("pack_size", old.get("pack_size", 1)),
                 args.get("lead_time_days", old.get("lead_time_days", 2)), old.get("supplier"), actor="agent"))
+        if name == "facilities_report":
+            return json.dumps(self.facilities.summary())
+        if name == "report_issue":
+            asset = next((a for a in self.facilities.list_assets()
+                          if a["name"].lower() == (args.get("asset") or "").lower()), None)
+            sev = args.get("severity", "normal")
+            if sev not in ("low", "normal", "high"):
+                raise StoreError("Agent can only file low, normal or high severity tickets")
+            return json.dumps(self.facilities.report_issue(
+                args["title"], args.get("description"), sev, asset["id"] if asset else None,
+                source="agent", actor="agent"))
+        if name == "report_problem":
+            return json.dumps(self.facilities.report_issue(
+                args["title"], args.get("description"), "normal", None, source="customer-chat",
+                actor="agent"))
         if name == "add_note":
             return json.dumps({"note_id": s.add_note(args["body"])})
         if name == "read_notes":
