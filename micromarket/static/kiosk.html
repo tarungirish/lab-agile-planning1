@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<title>Micromarket</title>
+<link rel="stylesheet" href="/assets/common.css"></head><body>
+<header><h1>🛒 Micromarket</h1></header>
+<main>
+<section id="shop" class="shop">
+  <div class="stack">
+    <div class="tiles" id="products"></div>
+    <div class="card"><h3>⚡ EV charging <span class="msg" id="cprice"></span></h3>
+      <div class="cc" id="chargers"></div><p class="msg" id="cmsg2"></p></div>
+    <div class="card"><h3>Ask the shopkeeper</h3>
+      <input id="cname" placeholder="Your name" style="margin-bottom:10px">
+      <textarea id="cmsg" rows="2" placeholder="Request an item, ask a question…"></textarea>
+      <div class="row"><span class="msg" id="creply"></span><button class="p" onclick="ask()">Send</button></div></div>
+  </div>
+  <div class="card cart"><h3>Your cart</h3><div id="cart"></div>
+    <div class="row" style="margin-top:14px"><span>Total</span><span class="total" id="total">$0.00</span></div>
+    <input id="who" placeholder="Name (optional)" style="margin:6px 0 12px">
+    <button class="p" style="width:100%;min-height:60px;font-size:20px" id="pay" onclick="pay()">Pay</button>
+    <p class="msg" id="paymsg"></p></div>
+</section>
+</main>
+<div class="scrim hide" id="scrim"><div class="card modal"><h3 id="mt"></h3><input id="mi"><p class="msg err" id="me"></p>
+  <div class="row"><button onclick="closeM(null)">Cancel</button><button class="p" onclick="closeM(document.getElementById('mi').value)">Confirm</button></div></div></div>
+<script src="/assets/common.js"></script>
+<script>
+let products=[],cart={};
+/* ---- shop ---- */
+async function loadProducts(){products=await api('/api/products');
+  $('products').innerHTML=products.map(p=>`<button class="tile card ${p.stock<=3?'low':''}" ${p.stock?'':'disabled'} onclick="add('${esc(p.sku)}')">
+   <b>${esc(p.name)}</b><span class="pr">${money(p.price_cents)}</span><small>${p.stock?(p.stock<=3?'Only '+p.stock+' left':p.stock+' available'):'Sold out'}</small></button>`).join('')}
+function add(s){const p=products.find(x=>x.sku===s);if((cart[s]||0)<p.stock){cart[s]=(cart[s]||0)+1;draw()}}
+function dec(s,d){const p=products.find(x=>x.sku===s);cart[s]=Math.min(p.stock,(cart[s]||0)+d);if(cart[s]<=0)delete cart[s];draw()}
+function draw(){let t=0;$('cart').innerHTML=Object.entries(cart).map(([s,q])=>{const p=products.find(x=>x.sku===s);t+=p.price_cents*q;
+  return`<div class="row"><span>${esc(p.name)}<br><small class="msg">${money(p.price_cents*q)}</small></span>
+   <span class="qty"><button onclick="dec('${esc(s)}',-1)">−</button><b>${q}</b><button onclick="dec('${esc(s)}',1)">+</button></span></div>`}).join('')||'<p class="msg">Tap an item to add it.</p>';
+  $('total').textContent=money(t);$('pay').disabled=!t}
+async function pay(){const m=$('paymsg');m.className='msg';m.textContent='';
+  try{const s=await post('/api/checkout',{items:Object.entries(cart).map(([sku,qty])=>({sku,qty})),customer:$('who').value||null});
+   cart={};draw();m.textContent=`Paid ${money(s.total_cents)} — receipt #${s.id}. Thanks!`}
+  catch(e){m.className='msg err';m.textContent=e.message}await loadProducts()}
+async function ask(){const n=$('cname').value.trim(),b=$('cmsg').value.trim();if(!n||!b){$('creply').textContent='Add your name and a message.';return}
+  $('creply').textContent='Thinking…';try{const r=await post('/api/messages',{customer:n,body:b});$('cmsg').value='';
+   $('creply').textContent=r.reply||'Message received — the owner will follow up.'}catch(e){$('creply').textContent=e.message}}
+async function loadChargers(){const r=await api('/api/chargers');$('cprice').textContent='· $'+(r.price_cents_per_kwh/100).toFixed(2)+' per kWh';
+  $('chargers').innerHTML=r.chargers.map(c=>`<button class="tile card" ${c.status==='available'?'':'disabled'} onclick="startCharge(${c.id})" style="min-height:92px">
+   <b>${esc(c.name)}</b><small>${c.power_kw} kW · ${esc(c.location)}</small><span class="pill ${c.status==='available'?'':'x'}" style="align-self:flex-start">${c.status.replace(/_/g,' ')}</span></button>`).join('')}
+async function startCharge(id){const m=$('cmsg2');let n=$('who').value.trim();
+  if(!n)n=(await prompt2('Start charging — your name','Name for your receipt'))?.trim();if(!n)return;
+  try{const s=await post(`/api/chargers/${id}/start`,{customer:n});m.className='msg';m.textContent=`Charging started on ${s.charger} (session #${s.id}). Let the owner know when you unplug.`}
+  catch(e){m.className='msg err';m.textContent=e.message}loadChargers()}
+// Public kiosk: wipe cart/names/messages after 90s of no touches so shoppers never see each other's data.
+let idle;const resetIdle=()=>{clearTimeout(idle);idle=setTimeout(()=>{cart={};draw();for(const id of['who','cname','cmsg'])$(id).value='';
+  for(const id of['paymsg','creply','cmsg2'])$(id).textContent='';closeM(null);loadProducts();loadChargers()},90000)};
+['pointerdown','keydown'].forEach(e=>addEventListener(e,resetIdle,{passive:true}));resetIdle();
+loadProducts();loadChargers();draw();setInterval(()=>{if(!Object.keys(cart).length){loadProducts();loadChargers()}},30000);
+</script></body></html>

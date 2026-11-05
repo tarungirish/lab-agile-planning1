@@ -4,11 +4,15 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import secrets
+import time
+from collections import defaultdict, deque
 from pathlib import Path
 
 import anthropic
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .agent import Shopkeeper
@@ -16,6 +20,24 @@ from .db import connect
 from .store import Store, StoreError
 
 STATIC = Path(__file__).parent / "static"
+
+
+class RateLimiter:
+    """In-memory sliding window per key. Fine for one kiosk process; use a proxy limiter if you scale out."""
+    def __init__(self, limit: int, window_s: float):
+        self.limit, self.window, self.hits = limit, window_s, defaultdict(deque)
+
+    def _trim(self, key):
+        q, now = self.hits[key], time.monotonic()
+        while q and now - q[0] > self.window:
+            q.popleft()
+        return q
+
+    def blocked(self, key) -> bool:
+        return len(self._trim(key)) >= self.limit
+
+    def hit(self, key):
+        self._trim(key).append(time.monotonic())
 
 
 class CartLine(BaseModel):
@@ -115,11 +137,24 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
         if task:
             task.cancel()
 
-    app = FastAPI(title="Micromarket POS", lifespan=lifespan)
+    # The kiosk is public, so don't publish the API schema (it lists every admin route).
+    app = FastAPI(title="Micromarket POS", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    owner_path = "/" + os.environ.get("OWNER_PATH", "owner").strip("/")
+    chat_limit = RateLimiter(limit=5, window_s=60)        # each message can cost model tokens
+    login_fails = RateLimiter(limit=5, window_s=300)      # lock an IP out after 5 bad tokens
 
-    def admin(x_admin_token: str | None = Header(None)):
+    def admin(request: Request, x_admin_token: str | None = Header(None)):
         expected = os.environ.get("ADMIN_TOKEN")
-        if expected and x_admin_token != expected:
+        if not expected:
+            # Fail closed: a public kiosk must never expose admin routes by accident.
+            if os.environ.get("MICROMARKET_ALLOW_OPEN_ADMIN") == "1":
+                return  # explicit local-dev escape hatch
+            raise HTTPException(503, "Owner access is disabled: set the ADMIN_TOKEN environment variable")
+        ip = request.client.host if request.client else "?"
+        if login_fails.blocked(ip):
+            raise HTTPException(429, "Too many failed attempts. Try again in a few minutes.")
+        if not secrets.compare_digest((x_admin_token or "").encode(), expected.encode()):
+            login_fails.hit(ip)
             raise HTTPException(401, "Admin token required")
 
     @app.exception_handler(StoreError)
@@ -127,9 +162,16 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
         from fastapi.responses import JSONResponse
         return JSONResponse({"error": str(exc)}, status_code=400)
 
+    app.mount("/assets", StaticFiles(directory=STATIC / "assets"), name="assets")
+
     @app.get("/")
-    def index():
-        return FileResponse(STATIC / "index.html")
+    def kiosk():  # public page: contains no owner UI or code
+        return FileResponse(STATIC / "kiosk.html", headers={"Cache-Control": "no-cache"})
+
+    @app.get(owner_path, include_in_schema=False)
+    def owner():  # separate URL; the page itself still needs the admin token to do anything
+        return FileResponse(STATIC / "owner.html", headers={
+            "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"})
 
     # --- kiosk (public) ---
     @app.get("/api/products")
@@ -142,7 +184,11 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
         return store.checkout([l.model_dump() for l in body.items], body.payment_method, body.customer)
 
     @app.post("/api/messages")
-    def message(body: MessageIn):
+    def message(body: MessageIn, request: Request):
+        key = request.client.host if request.client else "?"
+        if chat_limit.blocked(key):
+            raise HTTPException(429, "Please wait a minute before sending another message.")
+        chat_limit.hit(key)
         mid = store.add_message(body.customer, body.body)
         try:
             reply = agent.reply_to_customer(mid, body.customer, body.body)
@@ -162,6 +208,10 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
         return {k: s[k] for k in ("id", "charger", "started_at", "price_cents_per_kwh")}
 
     # --- admin ---
+    @app.get("/api/admin/ping", dependencies=[Depends(admin)])
+    def ping():  # login check: one request per attempt, so a typo counts as one failure
+        return {"ok": True}
+
     @app.get("/api/admin/summary", dependencies=[Depends(admin)])
     def summary():
         return store.summary()
