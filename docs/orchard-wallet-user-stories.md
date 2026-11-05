@@ -27,6 +27,7 @@ Each account is identified by the driver's **mobile phone number** (one number, 
 
 * **Payments:** Stripe. The payment method is saved at signup (Stripe SetupIntent) for off-session use, and charged after the session completes.
 * **Club access:** The driver uses the same Orchard digital card (wallet pass) to enter the club. Access is granted for the visit once they accept the offer.
+* **Door reader:** An NFC reader at the club entrance reads the Orchard pass. The pass carries only an ID; the reader (or its controller) asks Orchard's backend whether that ID has active club access, and unlocks the door on approval.
 * **Offer expiry:** The club offer is valid only while the charging session is in progress. When the session completes, the offer expires and a late YES is rejected.
 
 ## Requirements for Electric Era
@@ -45,7 +46,9 @@ To confirm in the build agreement and spec:
 ## Open questions
 
 * How fleet status is determined (fleet code, fleet account) and who is billed for the fleet fee.
-* What does the club door reader accept from the Orchard pass (NFC tap, QR/barcode), and how does it check that club access is active for the visit?
+* Apple and Google must approve Orchard for NFC-enabled passes (Apple VAS / NFC pass entitlement, Google Smart Tap). Start the applications early; this gates both the chargers and the door reader.
+* Which door reader hardware/vendor, and does it support Apple VAS and Google Smart Tap?
+* Does club access last for the whole visit or end when the charging session ends?
 * What happens if the session ends with the charge failing (retry schedule, club access revoked)?
 * Text opt-in/opt-out compliance (TCPA) and STOP handling.
 
@@ -189,6 +192,8 @@ Then I receive a text with the total and an email with an itemized receipt
 
 #### Details and Assumptions
 * Access is tied to an accepted offer for an active session.
+* The door has an NFC reader. A tap sends the pass ID to Orchard's backend, which answers allow or deny (target under 1 second).
+* Every tap, allowed or denied, is logged and visible in the dashboard.
 * Decision pending on whether access is also granted after the session ends (e.g. for the rest of the visit).
 
 #### Acceptance Criteria
