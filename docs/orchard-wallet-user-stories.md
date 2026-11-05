@@ -9,7 +9,9 @@ Drivers add an **Orchard card** to Apple Wallet or Google Wallet. There is no mo
 | Public    | $5       |
 | Fleet     | $3       |
 
-Accounts are managed by Orchard staff through an **internal dashboard**. All driver communication is by text (and email for receipts).
+Each account is identified by the driver's **mobile phone number** (one number, one account). Accounts are managed by Orchard staff through an **internal dashboard**. All driver communication is by text (and email for receipts).
+
+**Charging partner:** Electric Era. Charging hardware, tap detection, and session events depend on what Electric Era can provide (see open questions).
 
 ## Core flow
 
@@ -23,7 +25,11 @@ Accounts are managed by Orchard staff through an **internal dashboard**. All dri
 
 ## Open questions
 
-* Charger hardware and network protocol (e.g. OCPP), and whether chargers have screens.
+* Electric Era: can their chargers read an NFC wallet pass, or only RFID cards/their app? If not, the Orchard card may need to be a credential they already support.
+* Electric Era: do they provide webhooks/API for session started and session completed (driver ID, charger ID, energy delivered)?
+* Electric Era: who bills the driver for the electricity (them or Orchard)? Orchard may only bill the club fee.
+* Electric Era: can we reuse their existing fleet setup (e.g. WEX) to identify fleet drivers?
+* Which Electric Era sites have the club? Offers should only go out for taps at those chargers.
 * Payments provider (e.g. Stripe) and how a payment method is captured at pass issuance.
 * How the club verifies access at the door (QR on pass, staff lookup, etc.).
 * How fleet status is determined (fleet code, fleet account) and who is billed for the fleet fee.
@@ -43,6 +49,7 @@ Accounts are managed by Orchard staff through an **internal dashboard**. All dri
 
 #### Details and Assumptions
 * Issued from a web signup page; collects name, mobile number, email, payment method, and optional fleet code.
+* The phone number is the account identifier and must be unique. It is verified with a one-time text code before the pass is issued.
 * The pass contains an identifier only, no card data.
 
 #### Acceptance Criteria
@@ -60,7 +67,7 @@ Then the Orchard card appears in my wallet and my account is active
 **So that** my charging session starts and is linked to my account
 
 #### Details and Assumptions
-* Backend receives a "pass tapped at charger X" event and creates a session.
+* Backend receives a "pass tapped at charger X" event (via Electric Era) and looks up the account by pass ID / phone number.
 * Unknown or suspended accounts do not start a session.
 
 #### Acceptance Criteria
@@ -78,7 +85,8 @@ Then a charging session starts and is associated with my account
 **So that** I can add the lounge to my visit without an app
 
 #### Details and Assumptions
-* Text is sent within seconds of the tap.
+* Text is sent to the account's verified phone number within seconds of the tap.
+* Replies are matched to the account by the sender's phone number.
 * Message states the price for the driver's user type.
 * Public = $5, Fleet = $3.
 
