@@ -1,0 +1,25 @@
+# Render Blueprint: Dashboard -> New -> Blueprint -> pick this repo (and the branch to deploy).
+# Runs the self-contained demo (fresh demo data on every start; the free plan has no persistent disk).
+services:
+  - type: web
+    name: micromarket-demo
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m micromarket.demo --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit
+    envVars:
+      # Access codes: Render generates random values; find them under the service's Environment tab.
+      - key: ADMIN_TOKEN
+        generateValue: true
+      - key: STAFF_TOKEN
+        generateValue: true
+      - key: CAMERA_TOKEN
+        generateValue: true
+      # Render's proxy adds the visitor's IP as the last X-Forwarded-For entry; trust exactly that one hop,
+      # so per-IP limits (login lockout, chat/report rate limits) can't be dodged with a forged header.
+      - key: TRUSTED_PROXY_HOPS
+        value: "1"
+      # To use the real Claude model instead of the scripted stand-ins, add ANTHROPIC_API_KEY in the
+      # dashboard. Note the kiosk is public: shoppers' chat messages would then use your API credits.

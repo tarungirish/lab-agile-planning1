@@ -277,8 +277,13 @@ def main():
                 if f.endswith(".jpg"):
                     os.remove(os.path.join(image_dir, f))
         build_demo_store(a.db, image_dir=image_dir).db.close()
+    generated = set()
     for k in ("ADMIN_TOKEN", "STAFF_TOKEN", "CAMERA_TOKEN"):
-        os.environ.setdefault(k, secrets.token_urlsafe(9))
+        if not os.environ.get(k):
+            os.environ[k] = secrets.token_urlsafe(9)
+            generated.add(k)
+    # Only print codes this run made up; codes set by the host (e.g. Render) stay out of the logs.
+    shown = lambda k: os.environ[k] if k in generated else f"(set in the {k} environment variable)"
 
     from .app import create_app
     store = Store(connect(a.db))
@@ -286,16 +291,16 @@ def main():
     app = create_app(store, Shopkeeper(store, client=None if live else ScriptedClient(),
                                        vision=None if live else SimulatedVision(store), image_dir=image_dir))
 
-    base = f"http://{'localhost' if a.host in ('127.0.0.1', '0.0.0.0') else a.host}:{a.port}"
+    base = os.environ.get("RENDER_EXTERNAL_URL") or f"http://{'localhost' if a.host in ('127.0.0.1', '0.0.0.0') else a.host}:{a.port}"
     print(f"""
   Micromarket prototype  ({'live Claude model' if live else BANNER})
 
     Kiosk (public) : {base}/
-    Staff page     : {base}/staff     code: {os.environ['STAFF_TOKEN']}
-    Owner          : {base}/owner     code: {os.environ['ADMIN_TOKEN']}
+    Staff page     : {base}/staff     code: {shown('STAFF_TOKEN')}
+    Owner          : {base}/owner     code: {shown('ADMIN_TOKEN')}
     Cameras        : {'simulated, a photo every ' + str(a.camera_every) + ' s' if a.camera_every else 'off'}{' (counted by ' + ('Claude vision' if live else 'a simulated counter') + ')' if a.camera_every else ''}
 
-  Demo data only. Codes are random for this run. Ctrl+C to stop.
+  Demo data only. Ctrl+C to stop.
 """)
     if a.camera_every > 0:
         threading.Thread(target=_camera_loop, args=(store, a.port, a.camera_every), daemon=True).start()

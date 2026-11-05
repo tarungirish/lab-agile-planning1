@@ -1,4 +1,5 @@
 fastapi>=0.110
 uvicorn>=0.29
 anthropic>=1.0
+pillow>=10
 pytest>=8

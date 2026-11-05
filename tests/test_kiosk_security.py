@@ -79,3 +79,33 @@ def test_one_typo_does_not_lock_the_owner_out(monkeypatch):
     c = client(monkeypatch, ADMIN_TOKEN="right")
     assert c.get("/api/admin/ping", headers={"X-Admin-Token": "typo"}).status_code == 401
     assert c.get("/api/admin/ping", headers={"X-Admin-Token": "right"}).status_code == 200
+
+
+def test_client_ip_ignores_forged_forwarded_for_entries(monkeypatch):
+    from starlette.requests import Request as R
+    from micromarket.app import client_ip
+
+    def req(xff=None):
+        headers = [(b"x-forwarded-for", xff.encode())] if xff else []
+        return R({"type": "http", "headers": headers, "client": ("10.0.0.9", 1234)})
+
+    monkeypatch.delenv("TRUSTED_PROXY_HOPS", raising=False)
+    assert client_ip(req("1.2.3.4")) == "10.0.0.9"                    # no proxy configured: header ignored
+    monkeypatch.setenv("TRUSTED_PROXY_HOPS", "1")
+    assert client_ip(req("6.6.6.6, 203.0.113.7")) == "203.0.113.7"     # forged left entry ignored
+    assert client_ip(req("203.0.113.7")) == "203.0.113.7"
+    assert client_ip(req()) == "10.0.0.9"
+
+
+def test_lockout_cannot_be_dodged_by_rotating_forged_ips(monkeypatch):
+    c = client(monkeypatch, ADMIN_TOKEN="right", TRUSTED_PROXY_HOPS="1")
+    for i in range(5):   # attacker forges a new left-most IP each time; the proxy-added one stays the same
+        h = {"X-Admin-Token": "wrong", "X-Forwarded-For": f"9.9.9.{i}, 203.0.113.7"}
+        assert c.get("/api/admin/ping", headers=h).status_code == 401
+    assert c.get("/api/admin/ping", headers={"X-Admin-Token": "wrong",
+                                             "X-Forwarded-For": "9.9.9.99, 203.0.113.7"}).status_code == 429
+
+
+def test_healthz(monkeypatch):
+    c = client(monkeypatch, ADMIN_TOKEN="x")
+    assert c.get("/healthz").json() == {"ok": True}

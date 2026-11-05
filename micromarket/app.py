@@ -26,6 +26,22 @@ from .store import Store, StoreError
 STATIC = Path(__file__).parent / "static"
 
 
+def client_ip(request: Request) -> str:
+    """The visitor's IP for per-IP limits.
+
+    Behind a reverse proxy, set TRUSTED_PROXY_HOPS to the number of proxies you run (1 on Render). We then
+    take that many entries from the *right* of X-Forwarded-For: those are added by your own proxies, while
+    anything further left was supplied by the client and could be forged to dodge the lockout.
+    """
+    hops = int(os.environ.get("TRUSTED_PROXY_HOPS", "0") or 0)
+    xff = request.headers.get("x-forwarded-for")
+    if hops > 0 and xff:
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            return parts[-min(hops, len(parts))]
+    return request.client.host if request.client else "?"
+
+
 class RateLimiter:
     """In-memory sliding window per key. Fine for one kiosk process; use a proxy limiter if you scale out."""
     def __init__(self, limit: int, window_s: float):
@@ -254,7 +270,7 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
             if os.environ.get("MICROMARKET_ALLOW_OPEN_ADMIN") == "1":
                 return "ADMIN_TOKEN"  # explicit local-dev escape hatch
             raise HTTPException(503, f"Access is disabled: set the {' or '.join(env_names)} environment variable")
-        ip = request.client.host if request.client else "?"
+        ip = client_ip(request)
         if login_fails.blocked(ip):
             raise HTTPException(429, "Too many failed attempts. Try again in a few minutes.")
         given = (token or "").encode()
@@ -282,6 +298,10 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
 
     app.mount("/assets", StaticFiles(directory=STATIC / "assets"), name="assets")
 
+    @app.get("/healthz", include_in_schema=False)
+    def healthz():  # for the hosting platform's health check; reveals nothing
+        return {"ok": True}
+
     @app.get("/")
     def kiosk():  # public page: contains no owner UI or code
         return FileResponse(STATIC / "kiosk.html", headers={"Cache-Control": "no-cache"})
@@ -303,7 +323,7 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
 
     @app.post("/api/messages")
     def message(body: MessageIn, request: Request):
-        key = request.client.host if request.client else "?"
+        key = client_ip(request)
         if chat_limit.blocked(key):
             raise HTTPException(429, "Please wait a minute before sending another message.")
         chat_limit.hit(key)
@@ -325,7 +345,7 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
 
     @app.post("/api/issues")
     def report_problem(body: PublicIssueIn, request: Request):
-        key = request.client.host if request.client else "?"
+        key = client_ip(request)
         if issue_limit.blocked(key):
             raise HTTPException(429, "Thanks! Please wait a minute before sending another report.")
         issue_limit.hit(key)
