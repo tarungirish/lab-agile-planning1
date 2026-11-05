@@ -13,6 +13,20 @@ Each account is identified by the driver's **mobile phone number** (one number, 
 
 **Charging partner:** Electric Era designs and builds the charging infrastructure for Orchard's sites, so tap detection and session events are requirements we specify to them (see "Requirements for Electric Era").
 
+## Text message format
+
+Each Orchard text to a driver (tap/club offer, top-up confirmation, receipt) ends with this account summary:
+
+```
+Current Balance - $__
+Year to date kWh usage - __ kWh
+In store total spend - $__
+```
+
+* **Current Balance:** the prepaid balance from the ledger, after any deduction for this session.
+* **Year to date kWh usage:** the sum of `energy delivered` from completed sessions since January 1 (calendar year, account time zone unless decided otherwise). Requires kWh from Electric Era's `session_completed` event.
+* **In store total spend:** the total spent at the club/store since January 1. Requires the store or club purchases to be recorded against the account (see open questions).
+
 ## Core flow
 
 1. Driver taps the Orchard card (wallet pass) at the charger.
@@ -50,6 +64,8 @@ To confirm in the build agreement and spec:
 * Apple and Google must approve Orchard for NFC-enabled passes (Apple VAS / NFC pass entitlement, Google Smart Tap). Start the applications early; this gates both the chargers and the door reader.
 * Which door reader hardware/vendor, and does it support Apple VAS and Google Smart Tap?
 * Does club access last for the whole visit or end when the charging session ends?
+* In-store spend: what counts (club fees only, or also purchases at the store/lounge)? If balance is spendable at a register, which point-of-sale system records those purchases against the account?
+* Is "year to date" the calendar year or a rolling 12 months?
 * Preload rules: minimum balance to start a session, preload amounts, and whether the driver can opt in to auto-reload from a saved card.
 * Refunds and expiry: can unused balance be refunded, and does it expire?
 * Legal review of stored-value rules (gift card/stored-value, unclaimed property, refund requirements) before launch.
@@ -296,4 +312,31 @@ Then my balance is only credited once
 Given my balance is below the minimum
 When I tap my card at a charger
 Then the session does not start and I receive a text with a top-up link
+```
+
+### 12. Account summary in texts
+
+**As a** driver
+**I need** to see my balance, year-to-date charging, and in-store spend in each text
+**So that** I always know where my account stands
+
+#### Details and Assumptions
+* Format is defined in "Text message format". Values are formatted consistently ($ with two decimals, kWh with one).
+* Values reflect the state after the event that triggered the text (e.g. after the session deduction on the receipt).
+* Keep texts short: summary lines are appended after the main message.
+
+#### Acceptance Criteria
+
+```gherkin
+Given I am a driver with an active account
+When I receive a text from Orchard
+Then it ends with my Current Balance, Year to date kWh usage, and In store total spend
+
+Given my session has just completed and been deducted
+When I receive the receipt text
+Then Current Balance reflects the deduction and Year to date kWh usage includes this session
+
+Given I have had no sessions or purchases this year
+When I receive a text
+Then kWh usage and in-store spend show zero, not blank
 ```
