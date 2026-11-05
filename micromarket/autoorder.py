@@ -11,12 +11,14 @@ from __future__ import annotations
 import math
 from datetime import datetime, timedelta, timezone
 
+from .stockroom import Stockroom
 from .store import Store, StoreError
 
 FMT = "%Y-%m-%d %H:%M:%S"
 MODES = ("off", "suggest", "auto")
 VELOCITY_WINDOW_DAYS = 14
 SAFETY_DAYS = 1.0
+SHELF_COVER_DAYS = 1.0   # keep at least a day of sales on the shelf between restocking visits
 MAX_PAR = 500
 
 
@@ -24,6 +26,7 @@ class AutoOrder:
     def __init__(self, store: Store):
         self.store = store
         self.db = store.db
+        self.stockroom = Stockroom(store)
 
     # ---- mode / rules ----------------------------------------------------
     def mode(self) -> str:
@@ -72,6 +75,33 @@ class AutoOrder:
             "SELECT r.*, p.sku, p.name FROM reorder_rules r JOIN products p ON p.id=r.product_id ORDER BY p.name")]
 
     # ---- planning -----------------------------------------------------------
+    def _plan_transfers(self, t: datetime) -> list[dict]:
+        """Shelf -> stockroom pick list: top shelves back up to par from stockroom stock (free, no cash)."""
+        out = []
+        for r in self.db.execute(
+                "SELECT s.*, p.sku, p.name, p.stock, p.reorder_point FROM shelf_rules s"
+                " JOIN products p ON p.id=s.product_id WHERE s.enabled=1 AND p.active=1 ORDER BY p.name"):
+            pending_in = self.stockroom.pending_out(r["product_id"])  # already on the pick list
+            vel = self._velocity(r["product_id"], t)
+            trigger = max(r["reorder_point"], math.ceil(vel * SHELF_COVER_DAYS))
+            projected = r["stock"] + pending_in
+            need = r["par_level"] - projected
+            if projected > trigger or need <= 0:
+                continue
+            avail = self.stockroom.available(r["product_id"])
+            qty = min(need, avail)
+            out.append({"sku": r["sku"], "name": r["name"], "shelf": r["stock"], "pending_in": pending_in,
+                        "stockroom": self.store.warehouse_qty(r["product_id"]), "available": avail,
+                        "velocity_per_day": round(vel, 2), "trigger": trigger, "shelf_par": r["par_level"],
+                        "qty": qty, "short_by": need - qty, "status": "move" if qty > 0 else "empty",
+                        "reason": (f"Shelf has {r['stock']}" + (f" (+{pending_in} on pick list)" if pending_in else "")
+                                   + f", at or below {trigger}; fill to {r['par_level']}"
+                                   + ("" if qty == need else
+                                      f". Stockroom only has {avail}, short by {need - qty}" if qty else
+                                      ". Stockroom is empty for this item"))})
+        out.sort(key=lambda l: (l["shelf"] / l["velocity_per_day"] if l["velocity_per_day"] else float("inf"), l["sku"]))
+        return out
+
     def _velocity(self, product_id: int, now: datetime) -> float:
         since = (now - timedelta(days=VELOCITY_WINDOW_DAYS)).strftime(FMT)
         units = self.db.execute(
@@ -86,20 +116,28 @@ class AutoOrder:
                   - pol.min_cash_reserve_cents)
         cands = []
         for r in self.db.execute(
-                "SELECT r.*, p.sku, p.name, p.stock, p.cost_cents, p.reorder_point, p.active FROM reorder_rules r"
-                " JOIN products p ON p.id=r.product_id WHERE r.enabled=1 AND p.active=1"):
+                "SELECT r.*, p.sku, p.name, p.stock, p.cost_cents, p.reorder_point, p.active,"
+                " COALESCE(w.qty,0) wh, COALESCE(sr.par_level,0) shelf_par FROM reorder_rules r"
+                " JOIN products p ON p.id=r.product_id"
+                " LEFT JOIN warehouse_stock w ON w.product_id=r.product_id"
+                " LEFT JOIN shelf_rules sr ON sr.product_id=r.product_id AND sr.enabled=1"
+                " WHERE r.enabled=1 AND p.active=1"):
+            total = r["stock"] + r["wh"]  # everything we hold: shelf + stockroom
             on_order = self.db.execute(
                 "SELECT COALESCE(SUM(qty),0) FROM restocks WHERE product_id=? AND status='pending'",
                 (r["product_id"],)).fetchone()[0]
             vel = self._velocity(r["product_id"], t)
-            trigger = max(r["reorder_point"], math.ceil(vel * (r["lead_time_days"] + SAFETY_DAYS)))
-            projected = r["stock"] + on_order
+            # Also buy when everything we hold can't fill the shelf to its par: the shelf would stay short.
+            trigger = max(r["reorder_point"], math.ceil(vel * (r["lead_time_days"] + SAFETY_DAYS)),
+                          r["shelf_par"])
+            projected = total + on_order
             if projected > trigger:
                 continue
             need = r["par_level"] - projected
-            line = {"sku": r["sku"], "name": r["name"], "stock": r["stock"], "on_order": on_order,
+            line = {"sku": r["sku"], "name": r["name"], "stock": total, "shelf": r["stock"],
+                    "stockroom": r["wh"], "on_order": on_order,
                     "velocity_per_day": round(vel, 2),
-                    "days_of_cover": round(r["stock"] / vel, 1) if vel else None,
+                    "days_of_cover": round(total / vel, 1) if vel else None,
                     "trigger": trigger, "par_level": r["par_level"], "unit_cost_cents": r["cost_cents"],
                     "supplier": r["supplier"], "qty": 0, "cost_cents": 0, "status": "skipped", "reason": ""}
             if need <= 0:
@@ -128,21 +166,30 @@ class AutoOrder:
                     ln["reason"] = "Skipped: not enough cash above the reserve / per-order cap"
                 else:
                     ln.update(qty=qty, cost_cents=qty * unit, status="order",
-                              reason=(f"{ln['stock']} in stock + {ln['on_order']} on order is at or below "
+                              reason=(f"{ln['stock']} in stock ({ln['shelf']} shelf + {ln['stockroom']} stockroom) + {ln['on_order']} on order is at or below "
                                       f"the trigger of {ln['trigger']}; ordering up to par {ln['par_level']}"
                                       + (f" ({'; '.join(note)})" if note else "")))
                     budget -= qty * unit
             lines.append(ln)
         orders = [l for l in lines if l["status"] == "order"]
-        return {"mode": self.mode(), "lines": lines,
+        return {"mode": self.mode(), "transfers": self._plan_transfers(t), "lines": lines,
                 "total_cost_cents": sum(l["cost_cents"] for l in orders),
                 "budget_after_cents": budget}
 
     # ---- execution ----------------------------------------------------------
     def run(self, actor: str = "auto", now: str | None = None) -> dict:
         """Place every 'order' line from the current plan as a pending restock."""
-        placed, errors = [], []
-        for ln in self.plan(now)["lines"]:
+        placed, errors, moved = [], [], []
+        plan = self.plan(now)
+        for tr in plan["transfers"]:
+            if tr["status"] != "move":
+                continue
+            try:
+                x = self.stockroom.create_transfer(tr["sku"], tr["qty"], actor=actor)
+                moved.append({"transfer_id": x["id"], "sku": tr["sku"], "qty": tr["qty"]})
+            except StoreError as e:
+                errors.append({"sku": tr["sku"], "error": str(e)})
+        for ln in plan["lines"]:
             if ln["status"] != "order":
                 continue
             try:
@@ -150,9 +197,10 @@ class AutoOrder:
                 placed.append({"restock_id": r["id"], "sku": ln["sku"], "qty": ln["qty"]})
             except StoreError as e:
                 errors.append({"sku": ln["sku"], "error": str(e)})
-        if placed or errors:
-            self.store._audit(actor, "auto_order_run", f"placed {len(placed)}, errors {len(errors)}")
-        return {"placed": placed, "errors": errors}
+        if placed or moved or errors:
+            self.store._audit(actor, "auto_order_run",
+                              f"purchases {len(placed)}, transfers {len(moved)}, errors {len(errors)}")
+        return {"placed": placed, "transfers": moved, "errors": errors}
 
     def run_if_auto(self) -> dict | None:
         return self.run() if self.mode() == "auto" else None

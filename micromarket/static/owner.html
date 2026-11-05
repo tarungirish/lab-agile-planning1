@@ -22,6 +22,11 @@
       <div class="card"><h3>Needs attention</h3><div id="attn"></div></div></div>
     <div id="p-inv" class="hide"><div class="card" style="margin-bottom:16px"><h3>Inventory</h3><table id="inv"></table></div>
       <div class="card"><h3>Restock orders</h3><table id="rs"></table></div></div>
+    <div id="p-stk" class="hide">
+      <div class="card" style="margin-bottom:16px"><div class="row"><h3 style="margin:0">Pick list: stockroom → shelf</h3>
+        <button class="p" id="tall" onclick="doneAll()">All done</button></div>
+        <p class="msg" id="tmsg"></p><table id="ptl"></table></div>
+      <div class="card"><h3>Stock on hand</h3><table id="stk"></table></div></div>
     <div id="p-sales" class="hide"><div class="card"><h3>Recent sales</h3><table id="sales"></table></div></div>
     <div id="p-chg" class="hide">
       <div class="card" style="margin-bottom:16px"><h3>Charging trends
@@ -35,9 +40,11 @@
       <div class="card" style="margin-bottom:16px"><h3>Auto-ordering</h3>
         <div class="row" style="justify-content:flex-start;flex-wrap:wrap" id="amode"></div>
         <p class="msg" id="amodehelp"></p></div>
-      <div class="card" style="margin-bottom:16px"><div class="row"><h3 style="margin:0">Order plan</h3>
-        <button class="p" id="aorder" onclick="runAuto()">Order all</button></div>
-        <p class="msg" id="atotal"></p><table id="aplan"></table></div>
+      <div class="card" style="margin-bottom:16px"><div class="row"><h3 style="margin:0">Plan</h3>
+        <button class="p" id="aorder" onclick="runAuto()">Run plan</button></div>
+        <p class="msg" id="atotal"></p>
+        <p class="msg" style="margin-top:14px"><b>1 · Restock shelves from the stockroom</b> (free, no cash)</p><table id="atr"></table>
+        <p class="msg" style="margin-top:14px"><b>2 · Buy for the stockroom</b> (from vendors, within cash limits)</p><table id="aplan"></table></div>
       <div class="card"><h3>Reorder rules</h3><table id="arules"></table></div></div>
     <div id="p-log" class="hide"><div class="card"><h3>Audit log</h3><table id="audit"></table></div></div>
   </div>
@@ -48,23 +55,24 @@
 <script src="/assets/common.js"></script>
 <script>
 let tabNow='over',token='';authHeaders=()=>({'X-Admin-Token':token});
-const TABS=[['over','Overview'],['inv','Inventory'],['sales','Sales'],['chg','Charging'],['auto','Auto-order'],['log','Log']];
+const TABS=[['over','Overview'],['inv','Inventory'],['stk','Stockroom'],['sales','Sales'],['chg','Charging'],['auto','Auto-order'],['log','Log']];
 function tab(t){tabNow=t;for(const[k]of TABS)$('p-'+k).classList.toggle('hide',k!==t);drawTabs()}
 function drawTabs(){$('tabs').innerHTML=TABS.map(([k,l])=>`<button class="${k===tabNow?'on':''}" onclick="tab('${k}')">${l}</button>`).join('')}
 /* ---- owner ---- */
 async function loadAdmin(){token=$('tok').value||token;
-  try{await api('/api/admin/ping');const [s,inv,rs,sales,audit,ct,cs,ao]=await Promise.all(['summary','products','restocks','sales','audit','charging/trends?days='+$('cdays').value,'charging/sessions','autoorder'].map(p=>api('/api/admin/'+p)));
+  try{await api('/api/admin/ping');const [s,inv,rs,sales,audit,ct,cs,ao,sr]=await Promise.all(['summary','products','restocks','sales','audit','charging/trends?days='+$('cdays').value,'charging/sessions','autoorder','stockroom'].map(p=>api('/api/admin/'+p)));
    $('login').classList.add('hide');$('dash').classList.remove('hide');tab(tabNow);
    const card=(k,v)=>`<div class="card"><span class="msg">${k}</span><b>${v}</b></div>`;
    $('stats').innerHTML=[['Cash',money(s.cash_cents)],['Revenue',money(s.revenue_cents)],['Gross profit',money(s.gross_profit_cents)],['Sales',s.sales_count],['Low stock',s.low_stock.length]].map(x=>card(...x)).join('');
-   $('attn').innerHTML=(s.low_stock.map(l=>`<div class="row"><span>${esc(l.name)} <span class="msg">— ${l.stock} left</span></span><button class="sm" onclick="order('${esc(l.sku)}')">Order 12</button></div>`).join('')
+   $('attn').innerHTML=(s.low_stock.map(l=>{const room=(sr.stock.find(x=>x.sku===l.sku)||{}).stockroom||0;
+     return `<div class="row"><span>${esc(l.name)} <span class="msg">— ${l.stock} on shelf${room?`, ${room} in stockroom`:''}</span></span>`+(room?`<button class="sm" onclick="moveStock('${esc(l.sku)}')">Restock shelf</button>`:`<button class="sm" onclick="order('${esc(l.sku)}')">Order 12</button>`)+`</div>`}).join('')
      +cs.filter(x=>x.status==='active').map(x=>`<div class="row"><span>⚡ ${esc(x.charger)} — ${esc(x.customer)} <span class="msg">since ${esc(x.started_at.slice(11,16))}</span></span><button class="sm" onclick="stopCharge(${x.id})">Stop…</button></div>`).join(''))||'<p class="msg">Nothing right now. 🎉</p>';
    $('inv').innerHTML='<tr><th>Item</th><th>Price</th><th>Cost</th><th>Stock</th><th></th></tr>'+inv.map(p=>
      `<tr><td>${esc(p.name)}<br><span class="msg">${esc(p.sku)}</span></td><td>${money(p.price_cents)}</td><td>${money(p.cost_cents)}</td>
       <td ${p.stock<=p.reorder_point?'class="err"':''}><b>${p.stock}</b></td><td><button class="sm" onclick="order('${esc(p.sku)}')">Order 12</button></td></tr>`).join('');
    $('rs').innerHTML=rs.length?'<tr><th>#</th><th>Item</th><th>Qty</th><th>Unit cost</th><th>Status</th><th></th></tr>'+rs.map(r=>
      `<tr><td>${r.id}</td><td>${esc(r.name)}</td><td>${r.qty}</td><td>${money(r.unit_cost_cents)}</td><td>${r.status}</td>
-      <td>${r.status==='pending'?`<button class="sm" onclick="recv(${r.id})">Mark received</button>`:''}</td></tr>`).join(''):'<tr><td class="msg">No restock orders yet.</td></tr>';
+      <td>${r.status==='pending'?`<button class="sm" onclick="recv(${r.id})">Receive</button>`:''}</td></tr>`).join(''):'<tr><td class="msg">No restock orders yet.</td></tr>';
    $('sales').innerHTML='<tr><th>#</th><th>When</th><th>Items</th><th>Total</th><th></th></tr>'+sales.map(x=>
      `<tr><td>${x.id}</td><td>${esc(x.ts.slice(5,16))}</td><td>${x.items.map(i=>esc(i.name)+' ×'+i.qty).join(', ')}</td><td>${money(x.total_cents)}</td>
       <td>${x.status==='completed'?`<button class="sm" onclick="refund(${x.id})">Refund</button>`:'<span class="msg">refunded</span>'}</td></tr>`).join('');
@@ -78,14 +86,25 @@ async function loadAdmin(){token=$('tok').value||token;
    $('csess').innerHTML='<tr><th>#</th><th>Charger</th><th>Driver</th><th>Started</th><th>kWh</th><th>Cost</th><th></th></tr>'+cs.map(x=>
      `<tr><td>${x.id}</td><td>${esc(x.charger)}</td><td>${esc(x.customer)}</td><td>${esc(x.started_at.slice(5,16))}</td><td>${x.kwh??'–'}</td><td>${x.cost_cents==null?'–':money(x.cost_cents)}</td>
       <td>${x.status==='active'?`<button class="sm" onclick="stopCharge(${x.id})">Stop…</button>`:''}</td></tr>`).join('');
-   const HELP={off:'Nothing is ordered automatically and no suggestions are shown as actions.',suggest:'The plan below is a suggestion. You approve it with “Order all”.',auto:'Orders in the plan are placed automatically every hour, within spend caps and the cash reserve.'};
+   const HELP={off:'Nothing is ordered automatically and no suggestions are shown as actions.',suggest:'The plan below is a suggestion. You approve it with “Run plan”.',auto:'The plan runs automatically every hour: pick-list lines are created and vendor orders placed, within spend caps and the cash reserve.'};
    $('amode').innerHTML=['off','suggest','auto'].map(m=>`<button class="${ao.mode===m?'on':''}" onclick="setMode('${m}')">${m[0].toUpperCase()+m.slice(1)}</button>`).join('');
    $('amodehelp').textContent=HELP[ao.mode];
-   const pl=ao.plan,ords=pl.lines.filter(l=>l.status==='order');$('aorder').disabled=!ords.length||ao.mode==='off';
-   $('atotal').textContent=ords.length?`${ords.length} item(s), ${money(pl.total_cost_cents)} total. Cash left above reserve after ordering: ${money(Math.max(pl.budget_after_cents,0))}.`:'Nothing needs ordering right now.';
-   $('aplan').innerHTML=pl.lines.length?'<tr><th>Item</th><th>Stock</th><th>On order</th><th>Sells/day</th><th>Days left</th><th>Order</th><th>Cost</th></tr>'+pl.lines.map(l=>
-     `<tr><td>${esc(l.name)}<br><span class="msg">${esc(l.reason)}</span></td><td>${l.stock}</td><td>${l.on_order}</td><td>${l.velocity_per_day}</td><td>${l.days_of_cover??'–'}</td>
-      <td><b>${l.status==='order'?l.qty:'–'}</b></td><td>${l.status==='order'?money(l.cost_cents):''}</td></tr>`).join(''):'';
+   const pl=ao.plan,ords=pl.lines.filter(l=>l.status==='order'),mv=pl.transfers.filter(l=>l.status==='move');
+   $('aorder').disabled=!(ords.length||mv.length)||ao.mode==='off';
+   $('atotal').textContent=(mv.length||ords.length)?`${mv.length} item(s) to move to the shelf; ${ords.length} item(s) to buy for ${money(pl.total_cost_cents)}. Cash left above reserve after buying: ${money(Math.max(pl.budget_after_cents,0))}.`:'Nothing needs doing right now.';
+   $('atr').innerHTML=pl.transfers.length?'<tr><th>Item</th><th>Shelf</th><th>Stockroom</th><th>Sells/day</th><th>Move</th></tr>'+pl.transfers.map(l=>
+     `<tr><td>${esc(l.name)}<br><span class="msg">${esc(l.reason)}</span></td><td>${l.shelf}</td><td>${l.available}</td><td>${l.velocity_per_day}</td><td><b>${l.qty||'–'}</b></td></tr>`).join(''):'<tr><td class="msg">Shelves are fine.</td></tr>';
+   $('aplan').innerHTML=pl.lines.length?'<tr><th>Item</th><th>Shelf + room</th><th>On order</th><th>Sells/day</th><th>Days left</th><th>Order</th><th>Cost</th></tr>'+pl.lines.map(l=>
+     `<tr><td>${esc(l.name)}<br><span class="msg">${esc(l.reason)}</span></td><td>${l.shelf} + ${l.stockroom}</td><td>${l.on_order}</td><td>${l.velocity_per_day}</td><td>${l.days_of_cover??'–'}</td>
+      <td><b>${l.status==='order'?l.qty:'–'}</b></td><td>${l.status==='order'?money(l.cost_cents):''}</td></tr>`).join(''):'<tr><td class="msg">Stockroom stock is fine.</td></tr>';
+   const pend=sr.pending;$('tall').disabled=!pend.length;
+   $('tmsg').textContent=pend.length?'Carry these to the shelves, then tap Done as you stock each one.':'Nothing to carry. Shelves are stocked.';
+   $('ptl').innerHTML=pend.length?'<tr><th>Item</th><th>Qty</th><th></th></tr>'+pend.map(t=>`<tr><td>${esc(t.name)}</td><td><b>${t.qty}</b></td>
+     <td><button class="sm p" onclick="tdone(${t.id})">Done</button> <button class="sm" onclick="tcancel(${t.id})">Cancel</button></td></tr>`).join(''):'';
+   $('stk').innerHTML='<tr><th>Item</th><th>Shelf</th><th>Stockroom</th><th>On order</th><th>Shelf par</th><th></th></tr>'+sr.stock.map(x=>
+     `<tr><td>${esc(x.name)}</td><td ${x.shelf<=x.reorder_point?'class="err"':''}><b>${x.shelf}</b></td><td><b>${x.stockroom}</b>${x.reserved?`<br><span class="msg">${x.reserved} on pick list</span>`:''}</td><td>${x.on_order}</td>
+      <td>${x.shelf_par??'–'}</td><td><button class="sm" onclick="moveStock('${esc(x.sku)}')">Move…</button> <button class="sm" onclick="countStock('${esc(x.sku)}','shelf',${x.shelf})">Count shelf</button>
+      <button class="sm" onclick="countStock('${esc(x.sku)}','stockroom',${x.stockroom})">Count room</button> <button class="sm" onclick="shelfPar('${esc(x.sku)}',${x.shelf_par||0})">Par</button></td></tr>`).join('');
    $('arules').innerHTML='<tr><th>Item</th><th>Par</th><th>Pack</th><th>Lead time</th><th>Supplier</th><th></th></tr>'+ao.rules.map(r=>
      `<tr><td>${esc(r.name)}</td><td>${r.par_level}</td><td>${r.pack_size}</td><td>${r.lead_time_days} d</td><td>${esc(r.supplier||'–')}</td>
       <td><button class="sm" onclick="editRule('${esc(r.sku)}',${r.par_level},${r.pack_size},${r.lead_time_days})">Edit</button></td></tr>`).join('');
@@ -102,6 +121,13 @@ const setMode=m=>act(()=>api('/api/admin/autoorder/mode',{method:'PUT',body:JSON
 async function runAuto(){try{const r=await post('/api/admin/autoorder/run');if(r.errors.length)await prompt2('Some orders were refused','','text',r.errors.map(e=>e.sku+': '+e.error).join('\n'),true)}catch(e){await prompt2('Could not order','','text',e.message,true)}loadAdmin()}
 async function editRule(sku,par,pack,lead){const v=await prompt2('Par level for '+sku+' (currently '+par+', pack of '+pack+')','Order back up to this many','number');
   if(v)act(()=>api('/api/admin/autoorder/rules/'+sku,{method:'PUT',body:JSON.stringify({par_level:parseInt(v),pack_size:pack,lead_time_days:lead})}))}
+const tdone=id=>act(()=>post(`/api/admin/stockroom/transfers/${id}/complete`)),tcancel=id=>act(()=>post(`/api/admin/stockroom/transfers/${id}/cancel`)),
+ doneAll=()=>act(async()=>{const r=await post('/api/admin/stockroom/transfers/complete-all');if(r.errors.length)throw new Error(r.errors.map(e=>'#'+e.id+': '+e.error).join('; '))});
+async function moveStock(sku){const v=await prompt2('Move '+sku+' to the shelf','How many units?','number');if(v)act(()=>post('/api/admin/stockroom/transfers',{sku,qty:parseInt(v)}))}
+async function countStock(sku,location,cur){const v=await prompt2('Count '+location+' — '+sku+' (system says '+cur+')','Actual number','number');
+  if(v!==null&&v!=='')act(()=>post('/api/admin/stockroom/count',{sku,location,qty:parseInt(v),reason:'stock count'}))}
+async function shelfPar(sku,cur){const v=await prompt2('Shelf par for '+sku+(cur?' (now '+cur+')':''),'Keep the shelf filled to','number');
+  if(v)act(()=>api('/api/admin/stockroom/shelf-rules/'+sku,{method:'PUT',body:JSON.stringify({par_level:parseInt(v)})}))}
 async function runAgent(){$('arun').disabled=true;$('amsg').textContent='Agent is working…';
   try{const r=await post('/api/admin/agent/run',{task:$('task').value||null});$('areport').textContent=r.report;$('amsg').textContent=''}
   catch(e){$('amsg').textContent=e.message}$('arun').disabled=false;loadAdmin()}

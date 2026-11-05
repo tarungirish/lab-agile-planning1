@@ -87,6 +87,25 @@ CREATE TABLE IF NOT EXISTS reorder_rules (
   supplier TEXT,
   enabled INTEGER NOT NULL DEFAULT 1
 );
+-- Stockroom (back-of-house) inventory. products.stock is always the *shelf* quantity the kiosk sells.
+CREATE TABLE IF NOT EXISTS warehouse_stock (
+  product_id INTEGER PRIMARY KEY REFERENCES products(id),
+  qty INTEGER NOT NULL DEFAULT 0 CHECK (qty >= 0)
+);
+-- Shelf rule: how full to keep the shelf. Products with one are restocked from the stockroom.
+CREATE TABLE IF NOT EXISTS shelf_rules (
+  product_id INTEGER PRIMARY KEY REFERENCES products(id),
+  par_level INTEGER NOT NULL CHECK (par_level > 0),
+  enabled INTEGER NOT NULL DEFAULT 1
+);
+-- Stockroom -> shelf moves. 'pending' = on the pick list (qty is reserved in the stockroom).
+CREATE TABLE IF NOT EXISTS transfers (
+  id INTEGER PRIMARY KEY,
+  ts TEXT NOT NULL DEFAULT (datetime('now')),
+  product_id INTEGER NOT NULL REFERENCES products(id),
+  qty INTEGER NOT NULL CHECK (qty > 0),
+  status TEXT NOT NULL DEFAULT 'pending'  -- pending | completed | cancelled
+);
 -- Audit trail of everything the agent (or staff) changed.
 CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY,

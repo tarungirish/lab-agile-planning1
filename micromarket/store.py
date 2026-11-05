@@ -194,23 +194,41 @@ class Store:
             self._audit(actor, "order_restock", f"#{rid} {sku} x{qty} @ {unit}c")
         return dict(self.db.execute("SELECT * FROM restocks WHERE id=?", (rid,)).fetchone())
 
-    def receive_restock(self, restock_id: int, actor: str = "staff") -> dict:
+    def warehouse_qty(self, product_id: int) -> int:
+        r = self.db.execute("SELECT qty FROM warehouse_stock WHERE product_id=?", (product_id,)).fetchone()
+        return r["qty"] if r else 0
+
+    def receive_restock(self, restock_id: int, actor: str = "staff", to: str | None = None) -> dict:
+        """Mark a delivery received. `to` is 'stockroom' or 'shelf'. By default stock goes to the
+        stockroom for products that have a shelf rule, otherwise straight to the shelf (legacy)."""
+        if to not in (None, "stockroom", "shelf"):
+            raise StoreError("Destination must be 'stockroom' or 'shelf'")
         with self._tx():
             r = self.db.execute("SELECT * FROM restocks WHERE id=?", (restock_id,)).fetchone()
             if not r:
                 raise StoreError(f"Unknown restock: {restock_id}")
             if r["status"] != "pending":
                 raise StoreError(f"Restock is already {r['status']}")
+            if to is None:
+                has_rule = self.db.execute("SELECT 1 FROM shelf_rules WHERE product_id=?",
+                                           (r["product_id"],)).fetchone()
+                to = "stockroom" if has_rule else "shelf"
             self.db.execute("UPDATE restocks SET status='received' WHERE id=?", (restock_id,))
-            # Weighted-average cost keeps margin math honest across price changes.
             p = self.db.execute("SELECT * FROM products WHERE id=?", (r["product_id"],)).fetchone()
-            new_stock = p["stock"] + r["qty"]
-            avg = round((p["stock"] * p["cost_cents"] + r["qty"] * r["unit_cost_cents"]) / new_stock)
-            self.db.execute("UPDATE products SET stock=?, cost_cents=? WHERE id=?",
-                            (new_stock, avg, p["id"]))
+            on_hand = p["stock"] + self.warehouse_qty(p["id"])
+            # Weighted-average cost over everything we hold (shelf + stockroom) keeps margin math honest.
+            avg = round((on_hand * p["cost_cents"] + r["qty"] * r["unit_cost_cents"]) / (on_hand + r["qty"]))
+            if to == "shelf":
+                self.db.execute("UPDATE products SET stock=stock+?, cost_cents=? WHERE id=?",
+                                (r["qty"], avg, p["id"]))
+            else:
+                self.db.execute("INSERT INTO warehouse_stock(product_id,qty) VALUES (?,?)"
+                                " ON CONFLICT(product_id) DO UPDATE SET qty=qty+excluded.qty",
+                                (p["id"], r["qty"]))
+                self.db.execute("UPDATE products SET cost_cents=? WHERE id=?", (avg, p["id"]))
             self.db.execute("INSERT INTO ledger(kind,amount_cents,memo) VALUES ('restock',?,?)",
                             (-r["qty"] * r["unit_cost_cents"], f"restock #{restock_id}"))
-            self._audit(actor, "receive_restock", f"#{restock_id}")
+            self._audit(actor, "receive_restock", f"#{restock_id} -> {to}")
         return dict(self.db.execute("SELECT * FROM restocks WHERE id=?", (restock_id,)).fetchone())
 
     def list_restocks(self, status: str | None = None) -> list[dict]:

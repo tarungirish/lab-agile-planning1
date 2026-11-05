@@ -110,6 +110,23 @@ class RuleIn(BaseModel):
     enabled: bool = True
 
 
+class ShelfRuleIn(BaseModel):
+    par_level: int = Field(gt=0)
+    enabled: bool = True
+
+
+class CountIn(BaseModel):
+    sku: str
+    location: str
+    qty: int = Field(ge=0)
+    reason: str = Field("stock count", max_length=200)
+
+
+class TransferIn(BaseModel):
+    sku: str
+    qty: int = Field(gt=0)
+
+
 class TaskIn(BaseModel):
     task: str | None = Field(None, max_length=2000)
 
@@ -120,6 +137,7 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
     agent = shopkeeper or Shopkeeper(store)
     charging = agent.charging
     auto = agent.autoorder
+    room = auto.stockroom
     if auto_order_interval_s is None:
         auto_order_interval_s = float(os.environ.get("AUTO_ORDER_INTERVAL_MIN", "60")) * 60
 
@@ -245,8 +263,8 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
         return store.order_restock(body.sku, body.qty, body.unit_cost_cents)
 
     @app.post("/api/admin/restocks/{rid}/receive", dependencies=[Depends(admin)])
-    def receive(rid: int):
-        return store.receive_restock(rid)
+    def receive(rid: int, to: str | None = None):
+        return store.receive_restock(rid, to=to)
 
     @app.post("/api/admin/deposit", dependencies=[Depends(admin)])
     def deposit(body: DepositIn):
@@ -289,6 +307,41 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
     @app.get("/api/admin/charging/trends", dependencies=[Depends(admin)])
     def charge_trends(days: int = 30):
         return charging.trends(max(1, min(days, 365)))
+
+    @app.get("/api/admin/stockroom", dependencies=[Depends(admin)])
+    def stockroom_state():
+        return {"stock": room.list_stock(), "pending": room.list_transfers("pending"),
+                "recent": room.list_transfers(limit=15)}
+
+    @app.put("/api/admin/stockroom/shelf-rules/{sku}", dependencies=[Depends(admin)])
+    def shelf_rule(sku: str, body: ShelfRuleIn):
+        return room.set_shelf_rule(sku, body.par_level, body.enabled)
+
+    @app.post("/api/admin/stockroom/count", dependencies=[Depends(admin)])
+    def stock_count(body: CountIn):
+        return room.set_count(body.sku, body.location, body.qty, body.reason)
+
+    @app.post("/api/admin/stockroom/transfers", dependencies=[Depends(admin)])
+    def transfer_create(body: TransferIn):
+        return room.create_transfer(body.sku, body.qty)
+
+    @app.post("/api/admin/stockroom/transfers/complete-all", dependencies=[Depends(admin)])
+    def transfer_complete_all():
+        done, errors = [], []
+        for t in reversed(room.list_transfers("pending")):
+            try:
+                done.append(room.complete_transfer(t["id"])["id"])
+            except StoreError as e:
+                errors.append({"id": t["id"], "error": str(e)})
+        return {"completed": done, "errors": errors}
+
+    @app.post("/api/admin/stockroom/transfers/{tid}/complete", dependencies=[Depends(admin)])
+    def transfer_complete(tid: int):
+        return room.complete_transfer(tid)
+
+    @app.post("/api/admin/stockroom/transfers/{tid}/cancel", dependencies=[Depends(admin)])
+    def transfer_cancel(tid: int):
+        return room.cancel_transfer(tid)
 
     @app.get("/api/admin/autoorder", dependencies=[Depends(admin)])
     def autoorder_state():

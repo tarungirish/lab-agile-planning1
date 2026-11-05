@@ -6,6 +6,7 @@ Anthropic's [Project Vend](https://www.anthropic.com/research/project-vend-1).
 - **Kiosk** (`/`, public): product grid, cart, checkout, EV charger start, and a "message the shopkeeper" box. Contains no owner UI or code and resets itself after 90 s idle.
 - **Owner dashboard** (separate URL, `/owner` by default; set `OWNER_PATH` to change it; needs `ADMIN_TOKEN`): cash/revenue/profit, inventory, restock orders, sales + refunds, audit log, and a button to run the AI agent.
 - **EV charging** (`micromarket/charging.py`): chargers tagged by location (lot, lounge, …), start/stop sessions, per-kWh billing into the same cash ledger, and usage trends (by hour, day and location, utilization, margin over energy cost, and how often drivers also shop).
+- **Stockroom** (`micromarket/stockroom.py`): we are our own supplier. Vendor deliveries land in the stockroom; shelves (what the kiosk sells) are restocked from it via a pick list. Stock counts for shrink/miscounts.
 - **Auto-ordering** (`micromarket/autoorder.py`): per-product reorder rules (par level, pack size, lead time, supplier). A planner turns sales velocity and current/on-order stock into an explained order plan. Modes: Off / Suggest (owner approves) / Auto (hourly background job).
 - **AI shopkeeper** (`micromarket/agent.py`): Claude with tools to read inventory/sales, reprice, order stock, and keep a notes scratchpad.
 
@@ -74,3 +75,12 @@ Charger hardware integration (OCPP) so kWh comes from the meter instead of being
 - Behind a reverse proxy, run `uvicorn --proxy-headers --forwarded-allow-ips=<proxy ip>` so per-IP limits see real client IPs; otherwise all visitors share one limit bucket.
 - Lockout and rate limits are in memory and per process. A shared NAT (e.g. the office Wi-Fi the kiosk and owner both use) shares one IP, so someone hammering wrong tokens can briefly lock the owner out; wait 5 minutes or restart.
 - Run the kiosk iPad in Guided Access / single-app mode so shoppers can't leave the page.
+
+## Stockroom & shelves
+
+- `products.stock` is the **shelf** quantity (what the kiosk sells). Stockroom quantity is tracked separately.
+- A product with a **shelf rule** (shelf par) is restocked from the stockroom: the planner creates *pick-list* lines (transfers), which reserve stockroom units until you tap **Done** on the iPad after stocking the shelf. Moving stock is free (no cash, no lead time).
+- **Purchases** are for the stockroom and count shelf + stockroom + on-order stock. The purchasing par is the target for shelf + stockroom combined. It also buys when everything held can't fill the shelf to its par.
+- Delivered goods go to the stockroom for products with a shelf rule (override with `?to=shelf` on the receive endpoint); products without a shelf rule behave as before (straight to the shelf).
+- Cost basis is a weighted average over everything held (shelf + stockroom).
+- Not built yet: selling to other locations (multi-site), lot/expiry tracking, barcode scanning for counts.

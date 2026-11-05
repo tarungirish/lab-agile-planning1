@@ -17,8 +17,12 @@ if __name__ == "__main__":
             s.add_product(*it)
         s.deposit(20_000, "starting cash")
         ao = AutoOrder(s)
-        for sku, par, pack in [("COKE", 36, 12), ("WATER", 36, 12), ("CHIPS", 24, 6),
-                               ("BAR", 30, 10), ("NUTS", 16, 4), ("COFFEE", 16, 4)]:
+        # sku: (shelf par, stockroom on hand, purchase par for shelf+stockroom combined, pack size)
+        for sku, (shelf_par, room, par, pack) in {
+                "COKE": (24, 48, 96, 24), "WATER": (24, 48, 96, 24), "CHIPS": (12, 24, 48, 12),
+                "BAR": (16, 32, 64, 16), "NUTS": (8, 12, 24, 12), "COFFEE": (8, 16, 24, 6)}.items():
+            ao.stockroom.set_shelf_rule(sku, shelf_par)
+            ao.stockroom.set_count(sku, "stockroom", room, "opening count")
             ao.set_rule(sku, par, pack, lead_time_days=2, supplier="Metro Wholesale")
         c = Charging(s)
         c.add_charger("Lot A1", 7.4, "lot"); c.add_charger("Lot A2", 11, "lot")

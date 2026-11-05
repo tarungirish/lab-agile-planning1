@@ -21,6 +21,7 @@ MAX_TURNS = 12
 
 SYSTEM = """You are the shopkeeper of a small office micromarket (self-checkout shelves and a fridge).
 Your goals: keep popular items in stock, keep prices fair, and stay profitable.
+We are our own supplier: stock sits in a stockroom and shelves are restocked from it; vendor purchases refill the stockroom. Use auto_order_plan to see both.
 You also oversee the EV chargers (some are in the club lounge): watch usage trends and keep charging priced above energy cost.
 
 Rules:
