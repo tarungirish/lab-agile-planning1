@@ -27,6 +27,18 @@ python -m micromarket.demo          # builds demo data and prints the URLs + ran
 * **No API key needed.** Without `ANTHROPIC_API_KEY` the shopkeeper is a clearly-labelled *scripted* stand-in: not an AI model, but it drives the real tools, permissions and guardrails, so every screen works. Set the key and it uses the real Claude model automatically (`--scripted` forces the stand-in).
 * Things to try: buy something and watch stock fall; ask the shopkeeper about the cold brew; on `/owner` click **Run agent**, then **Auto-order → Run plan**, then **Stockroom → All done**; on `/staff` sign off a cleaning task.
 
+## Put the prototype on a public URL (Render)
+
+The repo includes a Render Blueprint (`render.yaml`) that runs the demo as a free web service.
+
+1. Sign in at render.com and connect GitHub (give Render access to this repository).
+2. **New → Blueprint**, pick this repository and the branch to deploy, then **Apply**.
+3. Wait for the first build (a few minutes). The URL is shown on the service page, e.g. `https://micromarket-demo.onrender.com` (Render adds a suffix if the name is taken).
+4. Find the access codes under the service's **Environment** tab: `ADMIN_TOKEN` (owner page `/owner`) and `STAFF_TOKEN` (staff page `/staff`). They're generated for you and never printed in the logs.
+5. Optional: add `ANTHROPIC_API_KEY` there to use the real Claude model and Claude vision. The kiosk is public, so shoppers' chat messages would then use your API credits (chat is limited to 5 messages per minute per visitor).
+
+Good to know about the free plan: the service sleeps after 15 minutes without visitors and takes about a minute to wake up, and the demo data resets on every restart, redeploy or sleep (no persistent disk). That's fine for showing the prototype; a real store needs a paid plan with a persistent disk or a hosted database.
+
 ## Run it (real setup)
 
 ```bash
@@ -41,7 +53,7 @@ uvicorn micromarket.app:create_app --factory
 pytest
 ```
 
-Env vars: `CAMERA_TOKEN` (cameras' upload code; uploads are disabled without it), `CAMERA_MIN_INTERVAL_S` (default 120: photos closer together are stored but not counted), `MICROMARKET_VISION_MODEL` (default `claude-opus-5-5`), `MICROMARKET_IMAGE_DIR` (default `camera_images/`), `AGENT_REVIEW_INTERVAL_MIN` (run the shopkeeper's review on a schedule; default 0 = off, since each run is a paid model call), `MICROMARKET_ALLOW_OPEN_ADMIN=1` (local dev only: allow admin with no token), `MICROMARKET_DB` (SQLite path), `AUTO_ORDER_INTERVAL_MIN` (scheduler period, default 60; only acts in Auto mode), `MICROMARKET_MODEL` (default `claude-opus-5-5`), `ADMIN_TOKEN`.
+Env vars: `TRUSTED_PROXY_HOPS` (behind a reverse proxy: how many proxies you run, 1 on Render; per-IP limits then trust only the proxy-added `X-Forwarded-For` entries), `CAMERA_TOKEN` (cameras' upload code; uploads are disabled without it), `CAMERA_MIN_INTERVAL_S` (default 120: photos closer together are stored but not counted), `MICROMARKET_VISION_MODEL` (default `claude-opus-5-5`), `MICROMARKET_IMAGE_DIR` (default `camera_images/`), `AGENT_REVIEW_INTERVAL_MIN` (run the shopkeeper's review on a schedule; default 0 = off, since each run is a paid model call), `MICROMARKET_ALLOW_OPEN_ADMIN=1` (local dev only: allow admin with no token), `MICROMARKET_DB` (SQLite path), `AUTO_ORDER_INTERVAL_MIN` (scheduler period, default 60; only acts in Auto mode), `MICROMARKET_MODEL` (default `claude-opus-5-5`), `ADMIN_TOKEN`.
 
 ## Design: lessons from Project Vend
 
