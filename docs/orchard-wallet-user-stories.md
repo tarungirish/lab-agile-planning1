@@ -11,7 +11,7 @@ Drivers add an **Orchard card** to Apple Wallet or Google Wallet. There is no mo
 
 Each account is identified by the driver's **mobile phone number** (one number, one account). Accounts are managed by Orchard staff through an **internal dashboard**. All driver communication is by text (and email for receipts).
 
-**Charging partner:** Electric Era. Charging hardware, tap detection, and session events depend on what Electric Era can provide (see open questions).
+**Charging partner:** Electric Era designs and builds the charging infrastructure for Orchard's sites, so tap detection and session events are requirements we specify to them (see "Requirements for Electric Era").
 
 ## Core flow
 
@@ -23,13 +23,21 @@ Each account is identified by the driver's **mobile phone number** (one number, 
 6. Payment method on file is charged for charging plus the club fee, if accepted.
 7. Driver receives a text and email receipt.
 
+## Requirements for Electric Era
+
+To confirm in the build agreement and spec:
+
+1. **Tap credential.** Chargers read an NFC wallet pass (Apple/Google Wallet) and return a stable pass/credential ID. If not feasible, agree on a supported alternative (e.g. an RFID/NFC card credential).
+2. **Session events.** Real-time webhooks or an API for `session_started` and `session_completed`, each with credential ID, charger ID, site ID, timestamps, and energy delivered (kWh).
+3. **Authorization.** Orchard authorizes taps: Electric Era asks Orchard (or accepts an allow-list) so unknown or suspended accounts do not start sessions.
+4. **Billing split.** Decide who bills for electricity (Electric Era or Orchard). Orchard bills at least the club fee, after the session completes.
+5. **Fleet.** Fleet drivers are identified by Orchard's account type; confirm how this interacts with any fleet programs on Electric Era's side.
+6. **Sites.** The list of sites with the club, so club offers are only sent for those chargers.
+7. **Reliability.** Retries and idempotency for events, and a way to reconcile missed events.
+8. **Test environment.** Sandbox or test charger so the tap-to-text flow can be tested before launch.
+
 ## Open questions
 
-* Electric Era: can their chargers read an NFC wallet pass, or only RFID cards/their app? If not, the Orchard card may need to be a credential they already support.
-* Electric Era: do they provide webhooks/API for session started and session completed (driver ID, charger ID, energy delivered)?
-* Electric Era: who bills the driver for the electricity (them or Orchard)? Orchard may only bill the club fee.
-* Electric Era: can we reuse their existing fleet setup (e.g. WEX) to identify fleet drivers?
-* Which Electric Era sites have the club? Offers should only go out for taps at those chargers.
 * Payments provider (e.g. Stripe) and how a payment method is captured at pass issuance.
 * How the club verifies access at the door (QR on pass, staff lookup, etc.).
 * How fleet status is determined (fleet code, fleet account) and who is billed for the fleet fee.
