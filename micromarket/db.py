@@ -57,6 +57,28 @@ CREATE TABLE IF NOT EXISTS messages (
   body TEXT NOT NULL,
   reply TEXT
 );
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS chargers (
+  id INTEGER PRIMARY KEY,
+  name TEXT UNIQUE NOT NULL,
+  location TEXT NOT NULL DEFAULT 'lot',   -- e.g. lot, garage, lounge
+  power_kw REAL NOT NULL CHECK (power_kw > 0),
+  in_service INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS charging_sessions (
+  id INTEGER PRIMARY KEY,
+  charger_id INTEGER NOT NULL REFERENCES chargers(id),
+  customer TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  kwh REAL,
+  price_cents_per_kwh INTEGER NOT NULL,   -- locked in at start
+  cost_cents INTEGER,
+  status TEXT NOT NULL DEFAULT 'active'   -- active | completed
+);
+-- At most one active session per charger, enforced by the database.
+CREATE UNIQUE INDEX IF NOT EXISTS one_active_session
+  ON charging_sessions(charger_id) WHERE status='active';
 -- Audit trail of everything the agent (or staff) changed.
 CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY,

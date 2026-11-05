@@ -12,6 +12,7 @@ import os
 
 import anthropic
 
+from .charging import Charging
 from .store import Store, StoreError
 
 MODEL = os.environ.get("MICROMARKET_MODEL", "claude-opus-5-5")
@@ -19,6 +20,7 @@ MAX_TURNS = 12
 
 SYSTEM = """You are the shopkeeper of a small office micromarket (self-checkout shelves and a fridge).
 Your goals: keep popular items in stock, keep prices fair, and stay profitable.
+You also oversee the EV chargers (some are in the club lounge): watch usage trends and keep charging priced above energy cost.
 
 Rules:
 - Prices must always cover cost plus a healthy margin. Never sell at a loss or give items away.
@@ -52,6 +54,19 @@ _TOOLS = {
             "properties": {"sku": {"type": "string"}, "qty": {"type": "integer"}},
             "required": ["sku", "qty"], "additionalProperties": False},
     },
+    "charging_report": {
+        "description": "EV charging trends over N days: sessions, kWh, revenue, margin, peak hour, usage by hour/day/location (e.g. lounge), utilization, and how often drivers also shop.",
+        "input_schema": {"type": "object", "properties": {"days": {"type": "integer"}}, "additionalProperties": False},
+    },
+    "charger_status": {
+        "description": "Live status of each EV charger (available / charging / out_of_service) and the current price per kWh.",
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    "set_charging_price": {
+        "description": "Change the EV charging price in cents per kWh. Refused if below energy cost + margin or a >50% change.",
+        "input_schema": {"type": "object", "properties": {"cents_per_kwh": {"type": "integer"}},
+                         "required": ["cents_per_kwh"], "additionalProperties": False},
+    },
     "add_note": {
         "description": "Save a note to your persistent scratchpad (decisions, observations, to-dos).",
         "input_schema": {
@@ -64,12 +79,13 @@ _TOOLS = {
     },
 }
 MANAGER_TOOLS = list(_TOOLS)
-CUSTOMER_TOOLS = ["list_inventory", "add_note"]
+CUSTOMER_TOOLS = ["list_inventory", "charger_status", "add_note"]
 
 
 class Shopkeeper:
     def __init__(self, store: Store, client: anthropic.Anthropic | None = None, model: str = MODEL):
         self.store = store
+        self.charging = Charging(store)
         self._client = client
         self.model = model
 
@@ -90,6 +106,15 @@ class Shopkeeper:
             return json.dumps(s.set_price(args["sku"], args["price_cents"], actor="agent"))
         if name == "order_restock":
             return json.dumps(s.order_restock(args["sku"], args["qty"], actor="agent"))
+        if name == "charging_report":
+            return json.dumps(self.charging.trends(int(args.get("days", 30))))
+        if name == "charger_status":
+            return json.dumps({"price_cents_per_kwh": self.charging.price_cents_per_kwh(),
+                               "chargers": [{k: c[k] for k in ("name", "location", "power_kw", "status")}
+                                            for c in self.charging.list_chargers()]})
+        if name == "set_charging_price":
+            return json.dumps({"price_cents_per_kwh":
+                               self.charging.set_price(args["cents_per_kwh"], actor="agent")})
         if name == "add_note":
             return json.dumps({"note_id": s.add_note(args["body"])})
         if name == "read_notes":

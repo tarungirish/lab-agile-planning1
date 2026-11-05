@@ -1,5 +1,6 @@
 """Seed demo data: python -m micromarket.seed"""
 from .db import connect
+from .charging import Charging
 from .store import Store
 
 ITEMS = [  # sku, name, price, cost, stock, reorder
@@ -14,6 +15,9 @@ if __name__ == "__main__":
         for it in ITEMS:
             s.add_product(*it)
         s.deposit(20_000, "starting cash")
+        c = Charging(s)
+        c.add_charger("Lot A1", 7.4, "lot"); c.add_charger("Lot A2", 11, "lot")
+        c.add_charger("Lounge 1", 22, "lounge"); c.add_charger("Lounge 2", 22, "lounge")
         print("Seeded", len(ITEMS), "products and $200.00 starting cash")
     else:
         print("Database already has products; skipping")

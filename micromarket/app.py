@@ -56,6 +56,24 @@ class MessageIn(BaseModel):
     body: str = Field(max_length=1000)
 
 
+class ChargerIn(BaseModel):
+    name: str
+    power_kw: float = Field(gt=0)
+    location: str = "lot"
+
+
+class StartIn(BaseModel):
+    customer: str = Field(max_length=80)
+
+
+class StopIn(BaseModel):
+    kwh: float = Field(ge=0)
+
+
+class ChargePriceIn(BaseModel):
+    cents_per_kwh: int
+
+
 class TaskIn(BaseModel):
     task: str | None = Field(None, max_length=2000)
 
@@ -63,6 +81,7 @@ class TaskIn(BaseModel):
 def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None) -> FastAPI:
     store = store or Store(connect())
     agent = shopkeeper or Shopkeeper(store)
+    charging = agent.charging
     app = FastAPI(title="Micromarket POS")
 
     def admin(x_admin_token: str | None = Header(None)):
@@ -97,6 +116,17 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None)
         except anthropic.APIError:
             reply = None  # message is saved; owner can follow up
         return {"id": mid, "reply": reply}
+
+    @app.get("/api/chargers")
+    def chargers():
+        return {"price_cents_per_kwh": charging.price_cents_per_kwh(),
+                "chargers": [{k: c[k] for k in ("id", "name", "location", "power_kw", "status")}
+                             for c in charging.list_chargers()]}
+
+    @app.post("/api/chargers/{charger_id}/start")
+    def charge_start(charger_id: int, body: StartIn):
+        s = charging.start(charger_id, body.customer)
+        return {k: s[k] for k in ("id", "charger", "started_at", "price_cents_per_kwh")}
 
     # --- admin ---
     @app.get("/api/admin/summary", dependencies=[Depends(admin)])
@@ -145,6 +175,37 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None)
             return {"report": agent.run_manager(body.task)}
         except anthropic.APIError as e:
             raise HTTPException(502, f"Agent unavailable: {e}")
+
+    @app.get("/api/admin/chargers", dependencies=[Depends(admin)])
+    def admin_chargers():
+        return {"price_cents_per_kwh": charging.price_cents_per_kwh(),
+                "energy_cost_cents_per_kwh": charging.energy_cost_cents_per_kwh(),
+                "chargers": charging.list_chargers()}
+
+    @app.post("/api/admin/chargers", dependencies=[Depends(admin)])
+    def add_charger(body: ChargerIn):
+        return charging.add_charger(body.name, body.power_kw, body.location)
+
+    @app.put("/api/admin/chargers/{charger_id}/service", dependencies=[Depends(admin)])
+    def charger_service(charger_id: int, in_service: bool):
+        charging.set_in_service(charger_id, in_service)
+        return {"ok": True}
+
+    @app.put("/api/admin/charging/price", dependencies=[Depends(admin)])
+    def charge_price(body: ChargePriceIn):
+        return {"price_cents_per_kwh": charging.set_price(body.cents_per_kwh)}
+
+    @app.get("/api/admin/charging/sessions", dependencies=[Depends(admin)])
+    def charge_sessions():
+        return charging.recent_sessions()
+
+    @app.post("/api/admin/charging/sessions/{sid}/stop", dependencies=[Depends(admin)])
+    def charge_stop(sid: int, body: StopIn):
+        return charging.stop(sid, body.kwh)
+
+    @app.get("/api/admin/charging/trends", dependencies=[Depends(admin)])
+    def charge_trends(days: int = 30):
+        return charging.trends(max(1, min(days, 365)))
 
     @app.get("/api/admin/notes", dependencies=[Depends(admin)])
     def notes():
