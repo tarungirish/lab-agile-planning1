@@ -33,10 +33,10 @@ async function load(login){if(login)token=$('tok').value;
    $('clean').innerHTML=d.cleaning.map(c=>{const cls=c.status==='overdue'?'bad':c.status==='due_soon'?'warn':'';
      const label=c.status==='overdue'?(c.last_done?'Overdue '+Math.round(c.hours_overdue)+' h':'Not done yet'):c.status==='due_soon'?'Due soon':'Done';
      return `<div class="task"><div><b>${esc(c.name)}</b><br><span class="msg">${esc(c.area)} · last: ${c.last_done?ago(c.last_done)+' by '+esc(c.last_by):'never'}</span></div>
-       <div style="display:flex;gap:10px;align-items:center"><span class="pill ${cls}">${label}</span><button class="p" onclick="done(${c.id},'${esc(c.name).replace(/'/g,'')}')">Mark done</button></div></div>`}).join('')||'<p class="msg">No cleaning tasks set up.</p>';
+       <div style="display:flex;gap:10px;align-items:center"><span class="pill ${cls}">${label}</span><button class="p" onclick="done(${c.id},${js(c.name)})">Mark done</button></div></div>`}).join('')||'<p class="msg">No cleaning tasks set up.</p>';
    $('ia').innerHTML='<option value="">Not about specific equipment</option>'+d.assets.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join('');
    $('issues').innerHTML=d.issues.map(i=>`<div class="task"><div><b>${esc(i.title)}</b> <span class="pill ${SEV[i.severity]}">${i.severity}</span><br>
-     <span class="msg">${esc(i.asset||'General')} · ${ago(i.ts)} · ${i.status.replace('_',' ')}${i.description?' — '+esc(i.description):''}</span></div>
+     <span class="msg">${esc(i.asset||'General')} · ${ago(i.ts)} · ${i.status.replace('_',' ')}${i.description?' — '+esc(i.description):''}</span>${i.triage_note?`<br><span class="msg">🤖 ${esc(i.triage_note.split('\n').pop())}</span>`:''}</div>
      <div style="display:flex;gap:8px">${i.status==='open'?`<button onclick="upd(${i.id},'in_progress')">Start</button>`:''}<button class="p" onclick="resolve(${i.id})">Resolve</button></div></div>`).join('')||'<p class="msg">No open issues. 🎉</p>'}
   catch(e){$('lerr').textContent=e.message}}
 async function done(id,name){let who=get('who');const v=await prompt2('Mark “'+name+'” as done','Your name',"text");

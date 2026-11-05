@@ -14,6 +14,8 @@ from .store import Store, StoreError
 FMT = "%Y-%m-%d %H:%M:%S"
 SEVERITIES = ("low", "normal", "high", "critical")
 ISSUE_STATUSES = ("open", "in_progress", "resolved")
+AGENT_SEVERITIES = ("low", "normal", "high")     # the agent may never mark something critical
+REMINDER_PREFIX = "Cleaning overdue: "
 DUE_SOON_FRACTION = 0.25   # "due soon" = last 25% of the interval remains
 
 
@@ -75,6 +77,12 @@ class Facilities:
             lid = self.db.execute("INSERT INTO cleaning_logs(task_id,ts,done_by,notes) VALUES (?,?,?,?)",
                                   (task_id, ts, done_by, notes)).lastrowid
             self.store._audit(actor, "cleaning_done", f"{t['name']} by {done_by}")
+            # Signing a task off closes the shopkeeper's reminder ticket for it, if there is one.
+            for r in self.db.execute("SELECT id FROM issues WHERE title=? AND source='agent' AND status!='resolved'",
+                                     (REMINDER_PREFIX + t["name"],)):
+                self.db.execute("UPDATE issues SET status='resolved', resolved_at=?, resolution=? WHERE id=?",
+                                (ts, f"Done by {done_by}", r["id"]))
+                self.store._audit(actor, "update_issue", f"#{r['id']} -> resolved (cleaning logged)")
         return dict(self.db.execute("SELECT * FROM cleaning_logs WHERE id=?", (lid,)).fetchone())
 
     def list_cleaning(self, now: str | None = None) -> list[dict]:
@@ -185,11 +193,29 @@ class Facilities:
         return self.get_issue(iid)
 
     def _set_asset_status(self, asset: dict, status: str, actor: str):
+        old = asset["status"]
         with self.store._tx():
             self.db.execute("UPDATE assets SET status=? WHERE id=?", (status, asset["id"]))
-            self.store._audit(actor, "asset_status", f"{asset['name']}: {asset['status']} -> {status}")
-        if asset["charger_id"] is not None:   # keep the charging side in step
-            self.charging.set_in_service(asset["charger_id"], status != "out_of_service", actor=actor)
+            self.store._audit(actor, "asset_status", f"{asset['name']}: {old} -> {status}")
+        # Keep a linked EV charger in step, but only on a real transition into or out of service,
+        # so e.g. a 'needs attention' flag can never switch on a charger the owner turned off.
+        if asset["charger_id"] is not None:
+            if status == "out_of_service" and old != "out_of_service":
+                self.charging.set_in_service(asset["charger_id"], False, actor=actor)
+            elif old == "out_of_service" and status != "out_of_service":
+                self.charging.set_in_service(asset["charger_id"], True, actor=actor)
+
+    def _recompute_asset(self, asset_id: int, actor: str):
+        """Asset status from its open issues. Out-of-service only clears once every issue is resolved."""
+        asset = self._asset(asset_id)
+        sev = {r["severity"] for r in self.db.execute(
+            "SELECT severity FROM issues WHERE asset_id=? AND status!='resolved'", (asset_id,))}
+        if asset["status"] == "out_of_service":
+            target = "out_of_service" if sev else "ok"
+        else:
+            target = "needs_attention" if sev & {"high", "critical"} else "ok"
+        if target != asset["status"]:
+            self._set_asset_status(asset, target, actor)
 
     def update_issue(self, issue_id: int, status: str, resolution: str | None = None,
                      actor: str = "staff", now: str | None = None) -> dict:
@@ -204,12 +230,48 @@ class Facilities:
                 (status, resolution, (now or _now().strftime(FMT)) if status == "resolved" else None, issue_id))
             self.store._audit(actor, "update_issue", f"#{issue_id} -> {status}")
         if status == "resolved" and iss["asset_id"] is not None:
-            left = self.db.execute("SELECT COUNT(*) FROM issues WHERE asset_id=? AND status!='resolved'",
-                                   (iss["asset_id"],)).fetchone()[0]
-            asset = self._asset(iss["asset_id"])
-            if left == 0 and asset["status"] != "ok":
-                self._set_asset_status(asset, "ok", actor)
+            self._recompute_asset(iss["asset_id"], actor)
         return self.get_issue(issue_id)
+
+    def triage_issue(self, issue_id: int, severity: str | None = None, note: str | None = None,
+                     actor: str = "agent", now: str | None = None) -> dict:
+        """Shopkeeper triage: adjust priority within low/normal/high and attach a note.
+        Critical issues, resolving, and taking equipment offline stay with people."""
+        iss = self.get_issue(issue_id)
+        if iss["status"] == "resolved":
+            raise StoreError("That issue is already resolved")
+        if iss["severity"] == "critical":
+            raise StoreError("Critical issues are handled by the owner")
+        if severity is not None and severity not in AGENT_SEVERITIES:
+            raise StoreError("Triage can set low, normal or high only")
+        if not severity and not note:
+            raise StoreError("Give a new severity, a note, or both")
+        stamp = (now or _now().strftime(FMT))[5:16]
+        new_note = (iss["triage_note"] + "\n" if iss["triage_note"] else "") + f"[{stamp}] {note.strip()[:300]}" if note else iss["triage_note"]
+        with self.store._tx():
+            self.db.execute("UPDATE issues SET severity=?, triage_note=? WHERE id=?",
+                            (severity or iss["severity"], new_note, issue_id))
+            self.store._audit(actor, "triage_issue", f"#{issue_id}: {iss['severity']} -> {severity or iss['severity']}")
+        if iss["asset_id"] is not None and severity and severity != iss["severity"]:
+            self._recompute_asset(iss["asset_id"], actor)
+        return self.get_issue(issue_id)
+
+    def remind_overdue_cleaning(self, actor: str = "agent", now: str | None = None) -> dict:
+        """File one normal-priority ticket per overdue cleaning task (shows on the staff page).
+        Idempotent: skips tasks that already have an open reminder; logging the clean closes it."""
+        created, skipped = [], []
+        for c in self.list_cleaning(now):
+            if c["status"] != "overdue":
+                continue
+            title = REMINDER_PREFIX + c["name"]
+            if self.db.execute("SELECT 1 FROM issues WHERE title=? AND status!='resolved'", (title,)).fetchone():
+                skipped.append(c["name"])
+                continue
+            last = f"last done {c['last_done']} by {c['last_by']}" if c["last_done"] else "never done"
+            self.report_issue(title, f"{c['area']}: due every {c['frequency_hours']:g} h, {last}.", "normal",
+                              None, "shopkeeper", source="agent", actor=actor, now=now)
+            created.append(c["name"])
+        return {"created": created, "already_open": skipped}
 
     def get_issue(self, iid: int) -> dict:
         r = self.db.execute("SELECT i.*, a.name asset FROM issues i LEFT JOIN assets a ON a.id=i.asset_id"

@@ -34,13 +34,13 @@
 let products=[],cart={};
 /* ---- shop ---- */
 async function loadProducts(){products=await api('/api/products');
-  $('products').innerHTML=products.map(p=>`<button class="tile card ${p.stock<=3?'low':''}" ${p.stock?'':'disabled'} onclick="add('${esc(p.sku)}')">
+  $('products').innerHTML=products.map(p=>`<button class="tile card ${p.stock<=3?'low':''}" ${p.stock?'':'disabled'} onclick="add(${js(p.sku)})">
    <b>${esc(p.name)}</b><span class="pr">${money(p.price_cents)}</span><small>${p.stock?(p.stock<=3?'Only '+p.stock+' left':p.stock+' available'):'Sold out'}</small></button>`).join('')}
 function add(s){const p=products.find(x=>x.sku===s);if((cart[s]||0)<p.stock){cart[s]=(cart[s]||0)+1;draw()}}
 function dec(s,d){const p=products.find(x=>x.sku===s);cart[s]=Math.min(p.stock,(cart[s]||0)+d);if(cart[s]<=0)delete cart[s];draw()}
 function draw(){let t=0;$('cart').innerHTML=Object.entries(cart).map(([s,q])=>{const p=products.find(x=>x.sku===s);t+=p.price_cents*q;
   return`<div class="row"><span>${esc(p.name)}<br><small class="msg">${money(p.price_cents*q)}</small></span>
-   <span class="qty"><button onclick="dec('${esc(s)}',-1)">−</button><b>${q}</b><button onclick="dec('${esc(s)}',1)">+</button></span></div>`}).join('')||'<p class="msg">Tap an item to add it.</p>';
+   <span class="qty"><button onclick="dec(${js(s)},-1)">−</button><b>${q}</b><button onclick="dec(${js(s)},1)">+</button></span></div>`}).join('')||'<p class="msg">Tap an item to add it.</p>';
   $('total').textContent=money(t);$('pay').disabled=!t}
 async function pay(){const m=$('paymsg');m.className='msg';m.textContent='';
   try{const s=await post('/api/checkout',{items:Object.entries(cart).map(([sku,qty])=>({sku,qty})),customer:$('who').value||null});

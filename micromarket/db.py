@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS ledger (
 CREATE TABLE IF NOT EXISTS notes (
   id INTEGER PRIMARY KEY,
   ts TEXT NOT NULL DEFAULT (datetime('now')),
-  body TEXT NOT NULL
+  body TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'agent'     -- agent | customer (customer notes are untrusted)
 );
 CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY,
@@ -145,7 +146,8 @@ CREATE TABLE IF NOT EXISTS issues (
   source TEXT NOT NULL DEFAULT 'owner',     -- kiosk | owner | staff | agent | customer-chat
   ts TEXT NOT NULL,
   resolved_at TEXT,
-  resolution TEXT
+  resolution TEXT,
+  triage_note TEXT
 );
 -- Audit trail of everything the agent (or staff) changed.
 CREATE TABLE IF NOT EXISTS audit (
@@ -201,10 +203,29 @@ class Database:
             self._conn.close()
 
 
+# (table, column, DDL for ALTER TABLE ADD COLUMN, optional backfill SQL)
+MIGRATIONS = [
+    ("notes", "source", "source TEXT NOT NULL DEFAULT 'agent'", None),
+    ("issues", "triage_note", "triage_note TEXT", None),
+    ("cleaning_tasks", "created_at", "created_at TEXT NOT NULL DEFAULT '1970-01-01 00:00:00'",
+     "UPDATE cleaning_tasks SET created_at=datetime('now') WHERE created_at='1970-01-01 00:00:00'"),
+]
+
+
+def _migrate(conn: sqlite3.Connection):
+    for table, column, ddl, backfill in MIGRATIONS:
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}  # names are constants above
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+            if backfill:
+                conn.execute(backfill)
+
+
 def connect(path: str | None = None) -> Database:
     path = path or os.environ.get("MICROMARKET_DB", "micromarket.db")
     conn = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return Database(conn)

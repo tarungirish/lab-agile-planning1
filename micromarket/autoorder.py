@@ -177,8 +177,9 @@ class AutoOrder:
                 "budget_after_cents": budget}
 
     # ---- execution ----------------------------------------------------------
-    def run(self, actor: str = "auto", now: str | None = None) -> dict:
-        """Place every 'order' line from the current plan as a pending restock."""
+    def run(self, actor: str = "auto", now: str | None = None, purchases: bool = True) -> dict:
+        """Create the plan's pick-list transfers and (if `purchases`) place its vendor orders.
+        With purchases=False the order lines are returned under 'awaiting_approval' instead."""
         placed, errors, moved = [], [], []
         plan = self.plan(now)
         for tr in plan["transfers"]:
@@ -189,7 +190,9 @@ class AutoOrder:
                 moved.append({"transfer_id": x["id"], "sku": tr["sku"], "qty": tr["qty"]})
             except StoreError as e:
                 errors.append({"sku": tr["sku"], "error": str(e)})
-        for ln in plan["lines"]:
+        awaiting = [] if purchases else [
+            {"sku": l["sku"], "qty": l["qty"], "cost_cents": l["cost_cents"]} for l in plan["lines"] if l["status"] == "order"]
+        for ln in plan["lines"] if purchases else []:
             if ln["status"] != "order":
                 continue
             try:
@@ -200,7 +203,7 @@ class AutoOrder:
         if placed or moved or errors:
             self.store._audit(actor, "auto_order_run",
                               f"purchases {len(placed)}, transfers {len(moved)}, errors {len(errors)}")
-        return {"placed": placed, "transfers": moved, "errors": errors}
+        return {"placed": placed, "transfers": moved, "errors": errors, "awaiting_approval": awaiting}
 
     def run_if_auto(self) -> dict | None:
         return self.run() if self.mode() == "auto" else None

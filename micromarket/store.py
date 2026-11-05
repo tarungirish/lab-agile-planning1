@@ -266,12 +266,14 @@ class Store:
         return [self.get_sale(i) for i in ids]
 
     # ---- agent memory / comms -----------------------------------------
-    def add_note(self, body: str) -> int:
-        return self.db.execute("INSERT INTO notes(body) VALUES (?)", (body,)).lastrowid
+    def add_note(self, body: str, source: str = "agent") -> int:
+        if source not in ("agent", "customer"):
+            raise StoreError("Note source must be 'agent' or 'customer'")
+        return self.db.execute("INSERT INTO notes(body, source) VALUES (?,?)", (body[:2000], source)).lastrowid
 
-    def list_notes(self, limit: int = 30) -> list[dict]:
-        return [dict(r) for r in self.db.execute(
-            "SELECT * FROM notes ORDER BY id DESC LIMIT ?", (limit,))][::-1]
+    def list_notes(self, limit: int = 30, source: str | None = None) -> list[dict]:
+        q = "SELECT * FROM notes" + (" WHERE source=?" if source else "") + " ORDER BY id DESC LIMIT ?"
+        return [dict(r) for r in self.db.execute(q, (source, limit) if source else (limit,))][::-1]
 
     def add_message(self, customer: str, body: str) -> int:
         return self.db.execute("INSERT INTO messages(customer,body) VALUES (?,?)",

@@ -134,23 +134,39 @@ class ScriptedClient:
         return self._manager(res) if "set_price" in names else self._customer(kw["messages"][0]["content"], res)
 
     def _manager(self, res):
-        if not res:
+        if not res:                                          # 1. read everything
             return NS(stop_reason="tool_use", content=[self._tool("sales_report"), self._tool("auto_order_plan"),
                                                        self._tool("facilities_report")])
-        s, plan, fac = res["sales_report"], res["auto_order_plan"]["plan"], res["facilities_report"]
-        moves = [f"{t['name']} ×{t['qty']}" for t in plan["transfers"] if t["status"] == "move"]
-        buys = [f"{l['name']} ×{l['qty']} (${l['cost_cents'] / 100:.2f})" for l in plan["lines"] if l["status"] == "order"]
-        overdue = [c["name"] for c in fac["cleaning"] if c["status"] == "overdue"]
-        worst = [f"{i['title']} [{i['severity']}]" for i in fac["issues"][:3]]
+        if "run_auto_order_plan" not in res:                 # 2. act within the owner's mode and the guardrails
+            acts = [self._tool("run_auto_order_plan"), self._tool("remind_overdue_cleaning")]
+            todo = [i for i in res["facilities_report"]["issues"] if i["severity"] != "critical"
+                    and not i.get("triage_note") and i["source"] != "agent"]
+            if todo:
+                i = todo[0]
+                note = ("Check today; if it keeps getting worse, ask the owner to take it out of service."
+                        if i["severity"] == "high" else "Staff can handle this on their next round.")
+                acts.append(self._tool("triage_issue", issue_id=i["id"], note=note))
+            return NS(stop_reason="tool_use", content=acts)
+        s, fac, run = res["sales_report"], res["facilities_report"], res["run_auto_order_plan"]
+        title = lambda i: i.get("title") or f"{i['untrusted_public_text']['title']} (public report)"
+        name = {r["sku"]: r["name"] for r in res["auto_order_plan"]["rules"]}.get
+        moved = [f"{name(t['sku'], t['sku'])} ×{t['qty']}" for t in run["transfers"]]
+        bought = [f"{name(p['sku'], p['sku'])} ×{p['qty']}" for p in run["placed"]]
+        waiting = [f"{name(w['sku'], w['sku'])} ×{w['qty']} (${w['cost_cents'] / 100:.2f})" for w in run["awaiting_approval"]]
+        rem = res["remind_overdue_cleaning"]
+        triaged = res.get("triage_issue")
+        owner = [title(i) for i in fac["issues"] if i["severity"] in ("high", "critical")]
         text = (f"[{BANNER}]\n\nMorning review\n"
                 f"• Cash ${s['cash_cents'] / 100:.2f}; ${s['revenue_cents'] / 100:.2f} revenue across {s['sales_count']} sales, "
                 f"gross profit ${s['gross_profit_cents'] / 100:.2f}.\n"
-                f"• Shelves to restock from the stockroom: {', '.join(moves) or 'none'}.\n"
-                f"• To buy for the stockroom: {', '.join(buys) or 'nothing'}.\n"
-                f"• Cleaning overdue: {', '.join(overdue) or 'none'}.\n"
-                f"• Open issues: {'; '.join(worst) or 'none'}.\n\n"
-                "Suggested next step: open the Auto-order tab and run the plan, then the Stockroom tab for the pick list.")
-        if "add_note" not in res:
+                f"• Ordering ({run['mode']} mode): pick list created for {', '.join(moved) or 'nothing'}; "
+                f"purchased {', '.join(bought) or 'nothing'}"
+                + (f"; awaiting your approval: {', '.join(waiting)}" if waiting else "") + ".\n"
+                f"• Cleaning: reminders filed for {', '.join(rem['created']) or 'nothing new'}"
+                + (f" (already open: {', '.join(rem['already_open'])})" if rem["already_open"] else "") + ".\n"
+                + (f"• Triaged: {title(triaged)}: {triaged['triage_note'].split('] ', 1)[-1]}\n" if triaged else "")
+                + f"• Needs your attention: {'; '.join(owner) or 'nothing urgent'}.")
+        if "add_note" not in res:                            # 3. remember what was done
             return NS(stop_reason="tool_use", content=[self._tool("add_note", body=text.split("\n\n", 1)[1][:600])])
         return NS(stop_reason="end_turn", content=[NS(type="text", text=text)])
 

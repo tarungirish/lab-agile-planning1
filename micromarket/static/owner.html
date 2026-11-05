@@ -17,7 +17,7 @@
     <div id="p-over">
       <div class="stats" id="stats"></div>
       <div class="card" style="margin-bottom:16px"><h3>🤖 Shopkeeper agent</h3>
-        <textarea id="task" rows="2" placeholder="Optional instruction. Leave blank for a routine review."></textarea>
+        <textarea id="task" rows="2" placeholder="Optional instruction. Leave blank for the routine review: sales, ordering (per your auto-order mode), cleaning reminders and ticket triage."></textarea>
         <div class="row"><span class="msg" id="amsg"></span><button class="p" id="arun" onclick="runAgent()">Run agent</button></div>
         <pre id="areport"></pre></div>
       <div class="card"><h3>Needs attention</h3><div id="attn"></div></div></div>
@@ -72,11 +72,11 @@ async function loadAdmin(){token=$('tok').value||token;
    const card=(k,v)=>`<div class="card"><span class="msg">${k}</span><b>${v}</b></div>`;
    $('stats').innerHTML=[['Cash',money(s.cash_cents)],['Revenue',money(s.revenue_cents)],['Gross profit',money(s.gross_profit_cents)],['Sales',s.sales_count],['Low stock',s.low_stock.length]].map(x=>card(...x)).join('');
    $('attn').innerHTML=(s.low_stock.map(l=>{const room=(sr.stock.find(x=>x.sku===l.sku)||{}).stockroom||0;
-     return `<div class="row"><span>${esc(l.name)} <span class="msg">— ${l.stock} on shelf${room?`, ${room} in stockroom`:''}</span></span>`+(room?`<button class="sm" onclick="moveStock('${esc(l.sku)}')">Restock shelf</button>`:`<button class="sm" onclick="order('${esc(l.sku)}')">Order 12</button>`)+`</div>`}).join('')
+     return `<div class="row"><span>${esc(l.name)} <span class="msg">— ${l.stock} on shelf${room?`, ${room} in stockroom`:''}</span></span>`+(room?`<button class="sm" onclick="moveStock(${js(l.sku)})">Restock shelf</button>`:`<button class="sm" onclick="order(${js(l.sku)})">Order 12</button>`)+`</div>`}).join('')
      +cs.filter(x=>x.status==='active').map(x=>`<div class="row"><span>⚡ ${esc(x.charger)} — ${esc(x.customer)} <span class="msg">since ${esc(x.started_at.slice(11,16))}</span></span><button class="sm" onclick="stopCharge(${x.id})">Stop…</button></div>`).join(''))||'<p class="msg">Nothing right now. 🎉</p>';
    $('inv').innerHTML='<tr><th>Item</th><th>Price</th><th>Cost</th><th>Stock</th><th></th></tr>'+inv.map(p=>
      `<tr><td>${esc(p.name)}<br><span class="msg">${esc(p.sku)}</span></td><td>${money(p.price_cents)}</td><td>${money(p.cost_cents)}</td>
-      <td ${p.stock<=p.reorder_point?'class="err"':''}><b>${p.stock}</b></td><td><button class="sm" onclick="order('${esc(p.sku)}')">Order 12</button></td></tr>`).join('');
+      <td ${p.stock<=p.reorder_point?'class="err"':''}><b>${p.stock}</b></td><td><button class="sm" onclick="order(${js(p.sku)})">Order 12</button></td></tr>`).join('');
    $('rs').innerHTML=rs.length?'<tr><th>#</th><th>Item</th><th>Qty</th><th>Unit cost</th><th>Status</th><th></th></tr>'+rs.map(r=>
      `<tr><td>${r.id}</td><td>${esc(r.name)}</td><td>${r.qty}</td><td>${money(r.unit_cost_cents)}</td><td>${r.status}</td>
       <td>${r.status==='pending'?`<button class="sm" onclick="recv(${r.id})">Receive</button>`:''}</td></tr>`).join(''):'<tr><td class="msg">No restock orders yet.</td></tr>';
@@ -110,23 +110,23 @@ async function loadAdmin(){token=$('tok').value||token;
      <td><button class="sm p" onclick="tdone(${t.id})">Done</button> <button class="sm" onclick="tcancel(${t.id})">Cancel</button></td></tr>`).join(''):'';
    $('stk').innerHTML='<tr><th>Item</th><th>Shelf</th><th>Stockroom</th><th>On order</th><th>Shelf par</th><th></th></tr>'+sr.stock.map(x=>
      `<tr><td>${esc(x.name)}</td><td ${x.shelf<=x.reorder_point?'class="err"':''}><b>${x.shelf}</b></td><td><b>${x.stockroom}</b>${x.reserved?`<br><span class="msg">${x.reserved} on pick list</span>`:''}</td><td>${x.on_order}</td>
-      <td>${x.shelf_par??'–'}</td><td><button class="sm" onclick="moveStock('${esc(x.sku)}')">Move…</button> <button class="sm" onclick="countStock('${esc(x.sku)}','shelf',${x.shelf})">Count shelf</button>
-      <button class="sm" onclick="countStock('${esc(x.sku)}','stockroom',${x.stockroom})">Count room</button> <button class="sm" onclick="shelfPar('${esc(x.sku)}',${x.shelf_par||0})">Par</button></td></tr>`).join('');
+      <td>${x.shelf_par??'–'}</td><td><button class="sm" onclick="moveStock(${js(x.sku)})">Move…</button> <button class="sm" onclick="countStock(${js(x.sku)},'shelf',${x.shelf})">Count shelf</button>
+      <button class="sm" onclick="countStock(${js(x.sku)},'stockroom',${x.stockroom})">Count room</button> <button class="sm" onclick="shelfPar(${js(x.sku)},${x.shelf_par||0})">Par</button></td></tr>`).join('');
    $('arules').innerHTML='<tr><th>Item</th><th>Par</th><th>Pack</th><th>Lead time</th><th>Supplier</th><th></th></tr>'+ao.rules.map(r=>
      `<tr><td>${esc(r.name)}</td><td>${r.par_level}</td><td>${r.pack_size}</td><td>${r.lead_time_days} d</td><td>${esc(r.supplier||'–')}</td>
-      <td><button class="sm" onclick="editRule('${esc(r.sku)}',${r.par_level},${r.pack_size},${r.lead_time_days})">Edit</button></td></tr>`).join('');
+      <td><button class="sm" onclick="editRule(${js(r.sku)},${r.par_level},${r.pack_size},${r.lead_time_days})">Edit</button></td></tr>`).join('');
    const SV={low:'',normal:'',high:'warn',critical:'bad'},ST={ok:'',needs_attention:'warn',out_of_service:'bad'};
    const cp=fc.compliance.overall;$('fstats').innerHTML=[['Cleaning overdue',fc.overdue],['Due soon',fc.due_soon],['Cleaning on time (14 d)',cp==null?'–':Math.round(cp*100)+'%'],['Open issues',fc.open_issues],['Equipment down',fc.assets_down]].map(x=>card(...x)).join('');
    $('fclean').innerHTML='<tr><th>Task</th><th>Every</th><th>Last done</th><th>Status</th><th></th></tr>'+fc.cleaning.map(c=>`<tr><td>${esc(c.name)}<br><span class="msg">${esc(c.area)}</span></td><td>${c.frequency_hours} h</td>
      <td>${c.last_done?esc(c.last_done.slice(5,16))+'<br><span class="msg">'+esc(c.last_by)+'</span>':'never'}</td>
      <td><span class="pill ${c.status==='overdue'?'bad':c.status==='due_soon'?'warn':''}">${c.status==='overdue'&&c.hours_overdue?'overdue '+Math.round(c.hours_overdue)+' h':c.status.replace('_',' ')}</span></td>
-     <td><button class="sm p" onclick="cleaned(${c.id},'${esc(c.name).replace(/'/g,'')}')">Mark done</button></td></tr>`).join('');
+     <td><button class="sm p" onclick="cleaned(${c.id},${js(c.name)})">Mark done</button></td></tr>`).join('');
    $('fhist').innerHTML=fc.history.slice(0,6).map(h=>`<tr><td>${esc(h.ts.slice(5,16))}</td><td>${esc(h.task)}</td><td>${esc(h.done_by)}</td></tr>`).join('')||'<tr><td class="msg">Nothing logged yet.</td></tr>';
-   $('fiss').innerHTML=fc.issues.length?'<tr><th>Issue</th><th>Severity</th><th>Where</th><th>Status</th><th></th></tr>'+fc.issues.map(i=>`<tr><td>${esc(i.title)}<br><span class="msg">${esc(i.source)}${i.reported_by?' · '+esc(i.reported_by):''} · ${esc(i.ts.slice(5,16))}</span></td>
+   $('fiss').innerHTML=fc.issues.length?'<tr><th>Issue</th><th>Severity</th><th>Where</th><th>Status</th><th></th></tr>'+fc.issues.map(i=>`<tr><td>${esc(i.title)}<br><span class="msg">${esc(i.source)}${i.reported_by?' · '+esc(i.reported_by):''} · ${esc(i.ts.slice(5,16))}</span>${i.triage_note?`<br><span class="msg">🤖 ${esc(i.triage_note.split('\n').pop())}</span>`:''}</td>
      <td><span class="pill ${SV[i.severity]}">${i.severity}</span></td><td>${esc(i.asset||'–')}</td><td>${i.status.replace('_',' ')}</td>
      <td>${i.status==='open'?`<button class="sm" onclick="issueUpd(${i.id},'in_progress')">Start</button> `:''}<button class="sm p" onclick="issueResolve(${i.id})">Resolve</button></td></tr>`).join(''):'<tr><td class="msg">No open issues. 🎉</td></tr>';
    $('fass').innerHTML='<tr><th>Equipment</th><th>Where</th><th>Status</th><th>Issues</th><th></th></tr>'+fc.assets.map(a=>`<tr><td>${esc(a.name)}<br><span class="msg">${esc(a.kind)}</span></td><td>${esc(a.location)}</td>
-     <td><span class="pill ${ST[a.status]}">${a.status.replace(/_/g,' ')}</span></td><td>${a.open_issues}</td><td><button class="sm" onclick="issueNew(${a.id},'${esc(a.name).replace(/'/g,'')}')">Report issue</button></td></tr>`).join('');
+     <td><span class="pill ${ST[a.status]}">${a.status.replace(/_/g,' ')}</span></td><td>${a.open_issues}</td><td><button class="sm" onclick="issueNew(${a.id},${js(a.name)})">Report issue</button></td></tr>`).join('');
    $('audit').innerHTML='<tr><th>When</th><th>Actor</th><th>Action</th><th>Detail</th></tr>'+audit.map(a=>
      `<tr><td>${esc(a.ts.slice(5,16))}</td><td>${esc(a.actor)}</td><td>${esc(a.action)}</td><td>${esc((a.detail||'').slice(0,100))}</td></tr>`).join('')}
   catch(e){$('lerr').textContent=e.message;$('derr').textContent='Could not refresh the dashboard: '+e.message+'. Showing the last data loaded.'}}

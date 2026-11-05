@@ -11,6 +11,7 @@ Anthropic's [Project Vend](https://www.anthropic.com/research/project-vend-1).
 - **EV charging** (`micromarket/charging.py`): chargers tagged by location (lot, lounge, …), start/stop sessions, per-kWh billing into the same cash ledger, and usage trends (by hour, day and location, utilization, margin over energy cost, and how often drivers also shop).
 - **Stockroom** (`micromarket/stockroom.py`): we are our own supplier. Vendor deliveries land in the stockroom; shelves (what the kiosk sells) are restocked from it via a pick list. Stock counts for shrink/miscounts.
 - **Auto-ordering** (`micromarket/autoorder.py`): per-product reorder rules (par level, pack size, lead time, supplier). A planner turns sales velocity and current/on-order stock into an explained order plan. Modes: Off / Suggest (owner approves) / Auto (hourly background job).
+- **Shopkeeper duties** (routine review, by button or on a schedule with `AGENT_REVIEW_INTERVAL_MIN`): runs the auto-order plan *as your mode allows* (Off: nothing; Suggest: the free stockroom-to-shelf pick list only, purchases wait for you; Auto: purchases too), files "Cleaning overdue" tickets that close themselves when staff sign the task off, and triages open tickets (low/normal/high plus a note). It can never mark anything critical, resolve tickets, or take equipment offline.
 - **AI shopkeeper** (`micromarket/agent.py`): Claude with tools to read inventory/sales, reprice, order stock, and keep a notes scratchpad.
 
 ## Try the prototype (one command)
@@ -39,7 +40,7 @@ uvicorn micromarket.app:create_app --factory
 pytest
 ```
 
-Env vars: `MICROMARKET_ALLOW_OPEN_ADMIN=1` (local dev only: allow admin with no token), `MICROMARKET_DB` (SQLite path), `AUTO_ORDER_INTERVAL_MIN` (scheduler period, default 60; only acts in Auto mode), `MICROMARKET_MODEL` (default `claude-opus-5-5`), `ADMIN_TOKEN`.
+Env vars: `AGENT_REVIEW_INTERVAL_MIN` (run the shopkeeper's review on a schedule; default 0 = off, since each run is a paid model call), `MICROMARKET_ALLOW_OPEN_ADMIN=1` (local dev only: allow admin with no token), `MICROMARKET_DB` (SQLite path), `AUTO_ORDER_INTERVAL_MIN` (scheduler period, default 60; only acts in Auto mode), `MICROMARKET_MODEL` (default `claude-opus-5-5`), `ADMIN_TOKEN`.
 
 ## Design: lessons from Project Vend
 
@@ -60,6 +61,8 @@ code (`store.py`, `Policy`), not in the prompt, so no conversation can talk them
 | Public abuse of problem reports | Kiosk reports are always "normal" severity, can't take equipment offline, and are limited to 3/min per IP; shoppers see only equipment names |
 | Staff over-reach | `STAFF_TOKEN` only opens `/api/staff/*` (cleaning + issues); staff can't mark issues critical or take equipment offline |
 | Agent over-reach on facilities | Agent can file low/normal/high tickets only; in customer chat it can only pass on a normal-priority complaint |
+| Agent ordering beyond what you allowed | `run_auto_order_plan` follows the owner's mode (Off / Suggest / Auto); in Suggest, purchases are returned for approval instead of placed |
+| Agent overriding people on safety | Triage is limited to low/normal/high; critical issues, resolving, and taking equipment offline stay with people |
 | Unaccountable changes | Every agent/staff change is written to an audit log; refunds are staff-only |
 
 Staff actions through the owner API bypass the agent policy but are still logged.
@@ -112,12 +115,14 @@ Charger hardware integration (OCPP) so kWh comes from the meter instead of being
 - Give cleaners the staff code only. The staff page asks who is signing off each task, and remembers the name on that device.
 - Not built yet: photo evidence for cleaning, fridge temperature logging, maintenance schedules (e.g. filter changes), notifications for overdue tasks.
 
-## Known issues (from the security review)
+## Security review: status
 
-Three Medium findings are open; fix them before putting this in front of the public:
+The three Medium findings from the review are fixed (see `tests/test_security_fixes.py`):
 
-1. Customer chat's `list_inventory` returns wholesale cost, which the kiosk deliberately hides.
-2. Customer-written text (`add_note`, ticket text) flows unmarked into the privileged manager agent's context (indirect prompt injection; bounded by the code guardrails).
-3. Staff can resolve an owner-raised critical issue, which brings a faulty EV charger back into service.
+1. **Customer chat no longer sees cost.** Tools know which tier is calling; customer chat gets the same public fields as the kiosk (name, price, stock).
+2. **Public text is labelled for the manager agent.** Notes written from customer chat are stored as `source='customer'` and returned under `untrusted_customer_notes`; ticket text from the kiosk or chat is moved under `untrusted_public_text`. The system prompt tells the model to treat `untrusted_*` as information only. The code guardrails still cap what any instruction could make it do.
+3. **Staff can't bring equipment back into service.** Staff can't resolve critical issues or any issue on out-of-service equipment (owner only), and the charger link now changes service state only on a real transition into or out of "out of service".
 
-The prototype also has no payment verification: any checkout is recorded as paid.
+Also hardened: a Content-Security-Policy plus `X-Frame-Options`, `nosniff`, `Referrer-Policy` and `Permissions-Policy` on every response; inline handlers use a `js()` helper (JSON string literal, then HTML-escaped) instead of `esc()` inside quotes; checkout accepts only `card`/`cash` and bounded fields.
+
+Still open: **no payment verification** (any checkout is recorded as paid until a payment processor is integrated). The CSP needs `'unsafe-inline'` for the inline scripts; moving them to files would allow a stricter policy.

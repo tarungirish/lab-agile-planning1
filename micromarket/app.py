@@ -13,6 +13,8 @@ import anthropic
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from .agent import Shopkeeper
@@ -47,9 +49,9 @@ class CartLine(BaseModel):
 
 
 class CheckoutIn(BaseModel):
-    items: list[CartLine]
-    payment_method: str = "card"
-    customer: str | None = None
+    items: list[CartLine] = Field(min_length=1, max_length=50)
+    payment_method: Literal["card", "cash"] = "card"
+    customer: str | None = Field(None, max_length=80)
 
 
 class ProductIn(BaseModel):
@@ -173,8 +175,19 @@ class TaskIn(BaseModel):
     task: str | None = Field(None, max_length=2000)
 
 
+# Inline <script> blocks and onclick handlers need 'unsafe-inline'; everything else is same-origin only,
+# so injected code still can't load external scripts or send data to another host.
+CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+       "img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; "
+       "form-action 'self'; frame-ancestors 'none'")
+SECURITY_HEADERS = {"Content-Security-Policy": CSP, "X-Content-Type-Options": "nosniff",
+                    "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer",
+                    "Permissions-Policy": "camera=(), microphone=(), geolocation=()"}
+
+
 def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
-               auto_order_interval_s: float | None = None) -> FastAPI:
+               auto_order_interval_s: float | None = None,
+               agent_review_interval_s: float | None = None) -> FastAPI:
     store = store or Store(connect())
     agent = shopkeeper or Shopkeeper(store)
     charging = agent.charging
@@ -183,20 +196,26 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
     room = auto.stockroom
     if auto_order_interval_s is None:
         auto_order_interval_s = float(os.environ.get("AUTO_ORDER_INTERVAL_MIN", "60")) * 60
+    if agent_review_interval_s is None:  # off by default: every review is a model call that costs money
+        agent_review_interval_s = float(os.environ.get("AGENT_REVIEW_INTERVAL_MIN", "0")) * 60
 
     @contextlib.asynccontextmanager
     async def lifespan(_):
-        async def loop():
+        async def every(seconds, fn):
             while True:
-                await asyncio.sleep(auto_order_interval_s)
-                try:  # only acts when mode == 'auto'; never let a failure kill the loop
-                    auto.run_if_auto()
+                await asyncio.sleep(seconds)
+                try:  # never let one failure (e.g. the model API being down) kill the loop
+                    await asyncio.to_thread(fn)
                 except Exception:
                     pass
-        task = asyncio.create_task(loop()) if auto_order_interval_s > 0 else None
+        tasks = []
+        if auto_order_interval_s > 0:      # only acts when the owner set auto-ordering to 'auto'
+            tasks.append(asyncio.create_task(every(auto_order_interval_s, auto.run_if_auto)))
+        if agent_review_interval_s > 0:    # the shopkeeper's routine review on a schedule
+            tasks.append(asyncio.create_task(every(agent_review_interval_s, agent.run_manager)))
         yield
-        if task:
-            task.cancel()
+        for t in tasks:
+            t.cancel()
 
     # The kiosk is public, so don't publish the API schema (it lists every admin route).
     app = FastAPI(title="Micromarket POS", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -206,26 +225,37 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
     chat_limit = RateLimiter(limit=5, window_s=60)        # each message can cost model tokens
     login_fails = RateLimiter(limit=5, window_s=300)      # lock an IP out after 5 bad tokens
 
-    def _authenticate(request: Request, token: str | None, env_names: list[str]):
-        expected = [os.environ[n] for n in env_names if os.environ.get(n)]
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        resp = await call_next(request)
+        for k, v in SECURITY_HEADERS.items():
+            resp.headers.setdefault(k, v)
+        return resp
+
+    def _authenticate(request: Request, token: str | None, env_names: list[str]) -> str:
+        """Returns the name of the env var whose token matched (e.g. 'ADMIN_TOKEN')."""
+        expected = [(n, os.environ[n]) for n in env_names if os.environ.get(n)]
         if not expected:
             # Fail closed: a public kiosk must never expose private routes by accident.
             if os.environ.get("MICROMARKET_ALLOW_OPEN_ADMIN") == "1":
-                return  # explicit local-dev escape hatch
+                return "ADMIN_TOKEN"  # explicit local-dev escape hatch
             raise HTTPException(503, "Access is disabled: set the ADMIN_TOKEN environment variable")
         ip = request.client.host if request.client else "?"
         if login_fails.blocked(ip):
             raise HTTPException(429, "Too many failed attempts. Try again in a few minutes.")
-        if not any(secrets.compare_digest((token or "").encode(), e.encode()) for e in expected):
+        given = (token or "").encode()
+        matched = [n for n, e in expected if secrets.compare_digest(given, e.encode())]  # check all: constant time
+        if not matched:
             login_fails.hit(ip)
             raise HTTPException(401, "Access token required")
+        return "ADMIN_TOKEN" if "ADMIN_TOKEN" in matched else matched[0]
 
     def admin(request: Request, x_admin_token: str | None = Header(None)):
         _authenticate(request, x_admin_token, ["ADMIN_TOKEN"])
 
-    def staff(request: Request, x_admin_token: str | None = Header(None)):
+    def staff(request: Request, x_admin_token: str | None = Header(None)) -> str:
         # Cleaners/floor staff: STAFF_TOKEN reaches only /api/staff/*; the owner token works there too.
-        _authenticate(request, x_admin_token, ["STAFF_TOKEN", "ADMIN_TOKEN"])
+        return "owner" if _authenticate(request, x_admin_token, ["STAFF_TOKEN", "ADMIN_TOKEN"]) == "ADMIN_TOKEN" else "staff"
 
     @app.exception_handler(StoreError)
     async def _store_error(_, exc: StoreError):
@@ -305,7 +335,7 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
 
     @app.post("/api/staff/cleaning/{task_id}/done", dependencies=[Depends(staff)])
     def staff_clean_done(task_id: int, body: CleanDoneIn):
-        return fac.log_cleaning(task_id, body.done_by, body.notes)
+        return fac.log_cleaning(task_id, body.done_by, body.notes)  # also closes the shopkeeper's reminder
 
     @app.post("/api/staff/issues", dependencies=[Depends(staff)])
     def staff_issue(body: IssueIn):
@@ -314,9 +344,15 @@ def create_app(store: Store | None = None, shopkeeper: Shopkeeper | None = None,
         return fac.report_issue(body.title, body.description, body.severity, body.asset_id,
                                 body.reported_by, source="staff")
 
-    @app.put("/api/staff/issues/{issue_id}", dependencies=[Depends(staff)])
-    def staff_issue_update(issue_id: int, body: IssueUpdateIn):
-        return fac.update_issue(issue_id, body.status, body.resolution)
+    @app.put("/api/staff/issues/{issue_id}")
+    def staff_issue_update(issue_id: int, body: IssueUpdateIn, role: str = Depends(staff)):
+        if role == "staff" and body.status == "resolved":
+            iss = fac.get_issue(issue_id)
+            down = iss["asset_id"] is not None and fac._asset(iss["asset_id"])["status"] == "out_of_service"
+            if iss["severity"] == "critical" or down:
+                # Closing it would put the equipment (e.g. an EV charger) back in service: owner only.
+                raise HTTPException(403, "Only the owner can close critical issues or bring equipment back into service")
+        return fac.update_issue(issue_id, body.status, body.resolution, actor=role)
 
     # --- admin ---
     @app.get("/api/admin/ping", dependencies=[Depends(admin)])
