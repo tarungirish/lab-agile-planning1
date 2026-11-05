@@ -2,7 +2,7 @@
 
 ## Product summary
 
-Drivers add an **Orchard card** to Apple Wallet or Google Wallet. There is no mobile app. Tapping the card at an Electric Era charger starts a charging session. The card also opens the club door and pays at the micro market. All driver communication is by **text** (and email for receipts).
+Drivers add an **Orchard card** to Apple Wallet or Google Wallet. There is no mobile app. Tapping the card at an Electric Era charger starts a charging session. A **club access fee is automatically added to every charging session**, so every driver can use the club without any extra decision. The card also opens the club door and pays at the micro market. All driver communication is by **text** (and email for receipts).
 
 The Orchard card is tied to the **default payment card in the driver's mobile wallet** (Apple Pay / Google Pay), chosen at signup and saved with Stripe. Charges are made to that card **after** the charging session completes. There is no prepaid balance.
 
@@ -15,13 +15,11 @@ Each account is identified by the driver's **mobile phone number** (one number, 
 1. **Sign up.** The driver signs up on a web page and verifies their phone number by text.
 2. **Get the card.** They add the Orchard card to Apple Wallet or Google Wallet.
 3. **Link a card.** They authorize their wallet's default card (Apple Pay / Google Pay) so Orchard can charge it after each session.
-4. **Arrive and tap.** They tap the card on the charger's NFC reader and charging starts.
-5. **Wait in the club.** They tap the card at the club door to enter and wait while the car charges.
+4. **Arrive and tap.** They tap the card on the charger's NFC reader and charging starts. The club fee is automatically part of the session.
+5. **Wait in the club.** They tap the card at the club door to enter and wait while the car charges. No offer or reply needed.
 6. **Stay informed.** They get a text when the car is done, or an "80% charged, would you like to unplug now?" reminder.
 7. **Shop.** They can buy items at the micro market with the card.
 8. **Leave.** They get a charging summary and a receipt for micro market purchases.
-
-> **Unconfirmed:** an earlier version of this plan added a "Would you like to use the club?" text with a club fee ($5 public, $3 fleet) when charging starts. The journey above does not mention it. Stories 5 to 7 keep it until confirmed. If the club is simply included for any driver who is charging, stories 5 and 6 and the fee come out and story 7 grants access to any active session.
 
 ## Text message format
 
@@ -42,9 +40,9 @@ In store total spend - $__
 ## Decisions
 
 * **Payments:** Stripe. The Orchard card is tied to the driver's default wallet card (Apple Pay / Google Pay), saved at signup for later charges made without the driver present. The charge happens only after the session completes.
+* **Club fee:** every charging session automatically includes a club access fee of **$5** (public; fleet is $3 unless decided otherwise). There is no opt-in text or prompt, so using the club is never a decision for the driver. The fee is shown at signup and on every receipt.
 * **No prepaid balance:** preloads, top-up links, and the balance ledger are removed from scope.
 * **Door:** an NFC reader at the club entrance reads the Orchard pass. The pass carries only an ID; the reader (or its controller) asks Orchard's backend whether that ID may enter, and unlocks the door on approval.
-* **Offer expiry (if the club offer stays):** the offer is valid only while the charging session is in progress.
 
 ## Requirements for Electric Era
 
@@ -63,7 +61,9 @@ To confirm in the build agreement and spec:
 
 ## Open questions
 
-* **Is the club offer and fee still in?** See the note under "User journey".
+* Fleet price: does the club fee stay $3 for fleet drivers, and how is fleet status determined (fleet code, fleet account)? Who is billed?
+* Disclosure: where is the automatic club fee shown to the driver (signup page and terms, charger screen or label, receipts)? Confirm what your state requires for disclosing mandatory fees.
+* Is the fee charged if a session is very short or stopped early, or if the charger faults? Refund policy for those cases.
 * Apple and Google must approve Orchard for NFC-enabled passes (Apple VAS / NFC pass entitlement, Google Smart Tap). Start the applications early; this gates both the chargers and the door reader.
 * Which door reader and micro market hardware, and do they support Apple VAS and Google Smart Tap?
 * Micro market: how does the driver pay (tap the card on a register or kiosk)? Which point-of-sale system records purchases against the account?
@@ -73,7 +73,6 @@ To confirm in the build agreement and spec:
 * Unplug reminder: percent threshold(s), and whether idle fees apply after charging completes.
 * Failed charges: retry schedule, and does the account get blocked from further sessions or the club until paid?
 * Is "year to date" the calendar year or a rolling 12 months?
-* How fleet status is determined (fleet code, fleet account) and who is billed.
 * Text opt-in/opt-out compliance (TCPA) and STOP handling.
 
 ---
@@ -169,50 +168,7 @@ When I tap my card at a charger
 Then the session does not start and I receive a text with a link to update my card
 ```
 
-### 5. Club offer by text (unconfirmed)
-
-**As a** driver
-**I need** to be asked by text whether I want club access
-**So that** I can add the lounge to my visit
-
-#### Details and Assumptions
-* Only if the club offer stays (see the note under "User journey").
-* Text is sent to the verified phone number within seconds of the tap.
-* The price is by user type: public $5, fleet $3.
-
-#### Acceptance Criteria
-
-```gherkin
-Given my charging session has started
-When the system sends me the club offer
-Then I receive a text stating the club price for my user type
-```
-
-### 6. Accept or decline the club offer (unconfirmed)
-
-**As a** driver
-**I need** to reply YES or NO to the club offer
-**So that** I only pay for the club if I want it
-
-#### Details and Assumptions
-* No reply is treated as a decline.
-* The offer is valid only during the charging session. A YES after `session_completed` gets a reply that the offer has expired, and no fee is added.
-* Replies are matched to the account by the sender's phone number, are case-insensitive, and unrecognized replies get a help message.
-* The fee is deducted when the session completes, not at reply time.
-
-#### Acceptance Criteria
-
-```gherkin
-Given I received a club offer for my active session
-When I reply "YES"
-Then the club fee is added to my session and I receive a confirmation text
-
-Given I received a club offer
-When I reply "NO" or do not reply
-Then no club fee is added to my session
-```
-
-### 7. Enter the club with the Orchard card
+### 5. Enter the club with the Orchard card
 
 **As a** driver
 **I need** to tap my Orchard card at the club door
@@ -220,7 +176,7 @@ Then no club fee is added to my session
 
 #### Details and Assumptions
 * The door has an NFC reader. A tap sends the pass ID to Orchard's backend, which answers allow or deny (target under 1 second).
-* Access rule: an active charging session, plus an accepted offer if the club offer stays.
+* Access rule: the account has an active charging session. The club fee is already part of the session, so no further step is needed.
 * Every tap, allowed or denied, is logged and visible in the dashboard.
 * Open: whether access continues for the rest of the visit after the session ends.
 
@@ -236,7 +192,7 @@ When I tap my Orchard card at the club door
 Then entry is denied and the tap is logged
 ```
 
-### 8. Unplug reminder at 80%
+### 6. Unplug reminder at 80%
 
 **As a** driver
 **I need** a text when my car reaches 80%
@@ -264,7 +220,7 @@ When charging continues
 Then the session is unchanged
 ```
 
-### 9. Charging complete notification
+### 7. Charging complete notification
 
 **As a** driver
 **I need** a text when my car has finished charging
@@ -278,14 +234,15 @@ When the system receives session_completed
 Then I receive a text telling me charging is complete, with the account summary
 ```
 
-### 10. Charge my card after the session
+### 8. Charge my card after the session
 
 **As a** driver
 **I need** my card charged only after my charging session ends
-**So that** I pay for what I actually used
+**So that** I pay for the session and club access only after I have used the station
 
 #### Details and Assumptions
-* Total = charging cost (if Orchard bills it) + club fee (if applicable).
+* Total = charging cost (if Orchard bills it) + club fee ($5 public, $3 fleet unless decided otherwise).
+* The club fee applies to every session, whether or not the driver visits the club.
 * The charge uses the saved card as an off-session Stripe payment.
 * Use an idempotency key per session so a repeated event never charges twice.
 * If the charge fails, the failure is flagged in the dashboard and the driver is texted a link to update the card. Retry policy to be decided.
@@ -295,7 +252,7 @@ Then I receive a text telling me charging is complete, with the account summary
 ```gherkin
 Given my charging session has completed
 When the system processes the payment
-Then my card is charged once for the session total
+Then my card is charged once for the session total, including the $5 club fee
 
 Given my session is still in progress
 When anything is owed
@@ -306,14 +263,14 @@ When the system processes the result
 Then the failure is flagged in the dashboard and I receive a text with a link to update my card
 ```
 
-### 11. Buy at the micro market
+### 9. Buy at the micro market
 
 **As a** driver
 **I need** to pay at the micro market with my Orchard card
 **So that** I can buy items without cash or another card
 
 #### Details and Assumptions
-* Paid with the saved card, like story 10. Whether purchases are charged one by one or combined is an open question.
+* Paid with the saved card, like story 8. Whether purchases are charged one by one or combined is an open question.
 * The way the driver pays at the market (tap at a register or kiosk) depends on the point-of-sale system chosen.
 * Each purchase is recorded against the account and counts toward In store total spend.
 * Not limited to when a charging session is active.
@@ -330,14 +287,14 @@ When I tap my Orchard card to pay
 Then the purchase is declined and I receive a text with a link to update my card
 ```
 
-### 12. Charging summary and purchase receipts
+### 10. Charging summary and purchase receipts
 
 **As a** driver
 **I need** a summary of my charge and a receipt for my purchases
 **So that** I know what I used and was charged
 
 #### Details and Assumptions
-* Charging summary after the session: duration, kWh delivered, amounts, and the card charged (last four digits).
+* Charging summary after the session: duration, kWh delivered, charging amount, club access fee, total, and the card charged (last four digits).
 * Purchase receipt for micro market items: itemized, sent by email, with a text showing the total.
 * The charging summary and purchase receipt are separate messages.
 
@@ -353,7 +310,7 @@ When the purchase completes
 Then I receive an itemized receipt by email and a text with the total
 ```
 
-### 13. Account summary in texts
+### 11. Account summary in texts
 
 **As a** driver
 **I need** to see today's spend, what I bought, and my year-to-date totals in each text
@@ -381,7 +338,7 @@ When I receive a text
 Then Today's spend, kWh usage and in-store spend show zero, and Purchased shows "Nothing yet", not blank
 ```
 
-### 14. Manage accounts in the internal dashboard
+### 12. Manage accounts in the internal dashboard
 
 **As an** Orchard staff member
 **I need** a dashboard to view and manage driver accounts, sessions and purchases
@@ -406,7 +363,7 @@ When I open the dashboard
 Then the account and session are flagged with the amount owed
 ```
 
-### 15. Text opt-out
+### 13. Text opt-out
 
 **As a** driver
 **I need** to be able to stop text messages
