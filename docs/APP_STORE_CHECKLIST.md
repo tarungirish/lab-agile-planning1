@@ -20,8 +20,8 @@
 
 ## Suggested listing text
 - **Name:** Clean Sweep
-- **Subtitle:** 15-minute photo-proof cleaning
-- **Description:** Race the clock room by room. Rate how bad each room is, take a before photo, clean, take an after photo and lock it in. A voice coach tells you where to start and keeps you moving. Everything stays on your phone.
+- **Subtitle:** Photo-proof cleaning timer
+- **Description:** Race the clock on any cleaning job: home, car, garage, desk or your own list. Rate how bad each task is, take a before photo, clean, take an after photo and lock it in. A voice coach tells you where to start and keeps you moving. Everything stays on your phone.
 - **Keywords:** cleaning,timer,chores,tidy,declutter,housework,productivity
 - **Review notes:** No login needed. Tap Start Sweep, rate a room, then add photos with the camera.
 

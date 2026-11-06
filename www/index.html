@@ -149,6 +149,18 @@
   }
   .cam-controls button { flex: 1; }
 
+  .setup { background: var(--card); border-radius: 16px; padding: 14px 16px; margin-bottom: 16px; }
+  .setup summary { cursor: pointer; font-weight: 600; color: var(--accent); }
+  .setup h4 { font-size: 0.8rem; color: var(--muted); margin: 14px 0 6px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { border: 1px solid #475569; background: transparent; color: var(--text); padding: 7px 12px; border-radius: 999px; font-size: 0.85rem; cursor: pointer; }
+  .chip.on { background: var(--accent); border-color: var(--accent); color: #0f172a; font-weight: 600; }
+  .addrow { display: flex; gap: 8px; margin-top: 14px; }
+  .addrow input { flex: 1; min-width: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid #475569; background: var(--bg); color: var(--text); font-size: 1rem; }
+  .addrow .btn { width: auto; margin-top: 0; padding: 10px 18px; }
+  .remove { background: transparent; border: none; color: var(--muted); font-size: 1.1rem; padding: 2px 6px; cursor: pointer; }
+  .header-right { display: flex; align-items: center; gap: 4px; }
+  .empty-note { color: var(--muted); text-align: center; padding: 20px 0; }
   .finish-screen {
     text-align: center; padding: 40px 20px;
   }
@@ -160,7 +172,7 @@
   <button type="button" class="timer-display" id="timerDisplay" onclick="toggleTimer()" aria-label="Start or pause timer">15:00</button>
 
   <h1>Clean Sweep</h1>
-  <p class="subtitle">Prove it with photos. No excuses.</p>
+  <p class="subtitle">Any mess. Prove it with photos. No excuses.</p>
 
   <button type="button" class="btn btn-primary" id="timerBtn" onclick="toggleTimer()">Start Sweep</button>
 
@@ -170,7 +182,7 @@
   </div>
 
   <div class="agent" id="agentBox">
-    <strong>Spite Agent:</strong> <span id="agentText">Take before photos and rate how bad each room is. I'll tell you the order of battle.</span>
+    <strong>Spite Agent:</strong> <span id="agentText">Take before photos and rate how bad each area is. I'll tell you the order of battle.</span>
   </div>
 
   <div class="priority" id="priorityBox" style="display:none">
@@ -178,16 +190,54 @@
     <ol id="priorityList"></ol>
   </div>
 
+  <details class="setup" id="setup">
+    <summary>Customize tasks and time</summary>
+    <h4>Starter lists</h4>
+    <div class="chips" id="presetChips"></div>
+    <h4>Time</h4>
+    <div class="chips" id="timeChips"></div>
+    <form class="addrow" id="addForm">
+      <input id="newTask" maxlength="30" placeholder="Add your own task, e.g. Car interior" autocomplete="off">
+      <button type="submit" class="btn btn-primary">Add</button>
+    </form>
+  </details>
+
   <div class="zone-list" id="zoneList"></div>
 
   <button class="btn btn-ghost" style="margin-top:24px" onclick="resetAll()">Reset Everything</button>
 
 <input type="file" id="picker" accept="image/*" capture="environment" hidden>
 <script>
-const ZONES = [
-  "Kitchen", "Bathroom", "Bedroom", "Living Room",
-  "Dining", "Entryway", "Laundry"
-];
+const PRESETS = {
+  "Home": ["Kitchen", "Bathroom", "Bedroom", "Living Room", "Dining", "Entryway", "Laundry"],
+  "Car": ["Front seats", "Back seats", "Floor mats", "Dashboard", "Windows", "Trunk", "Exterior"],
+  "Garage": ["Floor", "Workbench", "Shelves", "Tools", "Trash and recycling", "Donation pile"],
+  "Desk": ["Desk surface", "Drawers", "Cables", "Screen and keyboard", "Floor", "Paper pile"],
+  "Bathroom deep clean": ["Toilet", "Shower", "Sink", "Mirror", "Floor", "Cabinet"],
+  "Move-out": ["Kitchen", "Bathroom", "Bedrooms", "Closets", "Floors", "Windows", "Appliances"],
+  "Yard": ["Patio", "Lawn", "Beds", "Grill", "Trash bins", "Furniture"]
+};
+const TIMES = [10, 15, 30, 45, 60];
+
+function cleanName(n) {
+  return String(n || "").replace(/['"\\<>&`]/g, "").replace(/\s+/g, " ").trim().slice(0, 30);
+}
+
+let ZONES = PRESETS["Home"].slice();
+let minutes = 15;
+try {
+  const saved = JSON.parse(localStorage.getItem("cleansweep_setup") || "null");
+  if (saved && Array.isArray(saved.zones)) {
+    const names = saved.zones.map(cleanName).filter(Boolean);
+    ZONES = names.filter((n, i) => names.indexOf(n) === i).slice(0, 20);
+  }
+  if (saved && TIMES.includes(saved.minutes)) minutes = saved.minutes;
+} catch (e) {}
+let TOTAL = minutes * 60;
+
+function saveSetup() {
+  try { localStorage.setItem("cleansweep_setup", JSON.stringify({ zones: ZONES, minutes })); } catch (e) {}
+}
 
 const SPITE = {
   1: [
@@ -207,7 +257,7 @@ const SPITE = {
     "Looking at this should piss you off. Channel it."
   ],
   5: [
-    "Absolute disaster. This room has been mocking you.",
+    "Absolute disaster. This one has been mocking you.",
     "How did you let it get this disgusting? Fix it. Now."
   ]
 };
@@ -217,7 +267,7 @@ try { state = JSON.parse(localStorage.getItem("cleansweep") || "{}"); } catch (e
 let currentZone = null;
 let currentType = null; // "before" or "after"
 let timerInterval = null;
-let secondsLeft = 15 * 60;
+let secondsLeft = TOTAL;
 let resetArmed = false;
 let allDoneSpoken = false;
 
@@ -243,7 +293,7 @@ function updateAgent() {
   const rated = ZONES.filter(z => state[z].rating > 0 && !state[z].done);
   if (rated.length === 0) {
     document.getElementById("agentText").textContent =
-      "Take before photos and rate how bad each room is. I'll rank them.";
+      "Take before photos and rate how bad each area is. I'll rank them.";
     document.getElementById("priorityBox").style.display = "none";
     return;
   }
@@ -264,7 +314,7 @@ function updateAgent() {
 
 function render() {
   const list = document.getElementById("zoneList");
-  list.innerHTML = "";
+  list.innerHTML = ZONES.length ? "" : '<p class="empty-note">No tasks yet. Pick a starter list or add your own above.</p>';
 
   ZONES.forEach(zone => {
     const z = state[zone];
@@ -279,7 +329,7 @@ function render() {
     card.innerHTML = `
       <div class="zone-header">
         <span class="zone-name">${zone}</span>
-        ${badge}
+        <span class="header-right">${badge}<button type="button" class="remove" aria-label="Remove ${zone}" onclick="removeTask('${zone}')">✕</button></span>
       </div>
       <div class="photos">
         <div class="photo-box ${z.before ? "" : "empty"}" onclick="openCamera('${zone}','before')">
@@ -303,7 +353,7 @@ function render() {
         <button class="btn btn-success" onclick="markDone('${zone}')">Confirm Clean</button>
       ` : ""}
       ${z.done ? `
-        <button class="btn btn-ghost" onclick="resetZone('${zone}')">Reset Zone</button>
+        <button class="btn btn-ghost" onclick="resetZone('${zone}')">Reset Task</button>
       ` : ""}
     `;
     list.appendChild(card);
@@ -390,14 +440,14 @@ function resetAll() {
   state = {};
   initState();
   stopTimer();
-  secondsLeft = 15 * 60;
+  secondsLeft = TOTAL;
   updateTimerDisplay();
   setTimerUI();
   render();
 }
 
 function checkAllDone() {
-  const allDone = ZONES.every(z => state[z].done);
+  const allDone = ZONES.length > 0 && ZONES.every(z => state[z].done);
   if (allDone) {
     if (!allDoneSpoken) {
       allDoneSpoken = true;
@@ -418,7 +468,7 @@ function updateTimerDisplay() {
   const display = document.getElementById("timerDisplay");
   const fill = document.getElementById("timerFill");
   display.textContent = `${m}:${s}`;
-  fill.style.width = `${(secondsLeft / (15 * 60)) * 100}%`;
+  fill.style.width = `${(secondsLeft / TOTAL) * 100}%`;
 
   if (secondsLeft <= 60) {
     display.classList.add("urgent");
@@ -432,7 +482,7 @@ function updateTimerDisplay() {
 function setTimerUI() {
   const running = !!timerInterval;
   const done = secondsLeft <= 0;
-  const untouched = secondsLeft === 15 * 60;
+  const untouched = secondsLeft === TOTAL;
   const btn = document.getElementById("timerBtn");
   btn.textContent = done ? "Time's up" : running ? "Pause" : untouched ? "Start Sweep" : "Resume";
   btn.disabled = done;
@@ -469,13 +519,13 @@ function startTimer() {
       const undone = ZONES.filter(z => !state[z].done).length;
       say(undone === 0
         ? "Timer hit zero but you finished. Fine. Acceptable."
-        : `Time's up. You left ${undone} zone${undone > 1 ? "s" : ""} unfinished. Weak.`);
+        : `Time's up. You left ${undone} task${undone > 1 ? "s" : ""} unfinished. Weak.`);
     }
     // Mid-session taunts
     if (secondsLeft === 5 * 60 || secondsLeft === 2 * 60) {
       const remaining = ZONES.filter(z => !state[z].done);
       if (remaining.length) {
-        react(`${remaining.length} zones left and the clock is bleeding. Move.`);
+        react(`${remaining.length} tasks left and the clock is bleeding. Move.`);
       }
     }
   }, 1000);
@@ -515,6 +565,86 @@ function cancelEndAlert() {
 }
 // -------------------------------------------------------------
 
+// ---------- Custom tasks and time ----------
+let pendingPreset = null;
+
+function hasProgress() {
+  return ZONES.some(z => state[z] && (state[z].rating || state[z].before || state[z].after || state[z].done));
+}
+
+function renderSetup() {
+  const same = n => PRESETS[n].length === ZONES.length && PRESETS[n].every((z, i) => z === ZONES[i]);
+  document.getElementById("presetChips").innerHTML = Object.keys(PRESETS).map(n =>
+    `<button type="button" class="chip ${same(n) ? "on" : ""}" onclick="applyPreset('${n}')">${n}</button>`).join("");
+  document.getElementById("timeChips").innerHTML = TIMES.map(m =>
+    `<button type="button" class="chip ${m === minutes ? "on" : ""}" onclick="setMinutes(${m})">${m} min</button>`).join("");
+}
+
+function applyPreset(name) {
+  if (hasProgress() && pendingPreset !== name) {
+    pendingPreset = name;
+    flash(`Tap ${name} again to replace your list and clear progress.`);
+    setTimeout(() => { pendingPreset = null; }, 4000);
+    return;
+  }
+  pendingPreset = null;
+  ZONES = PRESETS[name].slice();
+  state = {};
+  initState();
+  stopTimer();
+  secondsLeft = TOTAL;
+  saveSetup();
+  updateTimerDisplay();
+  setTimerUI();
+  render();
+  renderSetup();
+  flash(`${name} list loaded. Rate each task, then start the clock.`);
+}
+
+function setMinutes(m) {
+  if (timerInterval || secondsLeft !== TOTAL) {
+    flash("Reset Everything before changing the time.");
+    return;
+  }
+  minutes = m;
+  TOTAL = m * 60;
+  secondsLeft = TOTAL;
+  saveSetup();
+  updateTimerDisplay();
+  setTimerUI();
+  renderSetup();
+}
+
+function addTask(raw) {
+  const name = cleanName(raw);
+  if (!name) return;
+  if (ZONES.includes(name)) { flash(`${name} is already on the list.`); return; }
+  if (ZONES.length >= 20) { flash("That's plenty. Finish some tasks first."); return; }
+  ZONES.push(name);
+  state[name] = { before: null, after: null, rating: 0, done: false };
+  saveSetup();
+  save();
+  render();
+  renderSetup();
+}
+
+function removeTask(zone) {
+  ZONES = ZONES.filter(z => z !== zone);
+  delete state[zone];
+  saveSetup();
+  save();
+  render();
+  renderSetup();
+}
+
+document.getElementById("addForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const input = document.getElementById("newTask");
+  addTask(input.value);
+  input.value = "";
+});
+// -------------------------------------------
+
 // ---------- Voice coach ----------
 let coachOn = false;
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -544,10 +674,10 @@ function nextStep() {
   if (working) return `Clean ${working}, then take the after photo.`;
   const rated = open.filter(z => state[z].rating > 0)
     .sort((a, b) => state[b].rating - state[a].rating);
-  const started = secondsLeft < 15 * 60;
+  const started = secondsLeft < TOTAL;
   if (rated.length) {
     const tip = started || timerInterval ? "" : " Say start when you're ready.";
-    return `Take the before photo of ${rated[0]}, your worst room.${tip}`;
+    return `Take the before photo of ${rated[0]}, your worst one.${tip}`;
   }
   return `Rate ${open[0]} from one to five. You can say, rate ${open[0].toLowerCase()} four.`;
 }
@@ -574,7 +704,7 @@ function toggleCoach() {
       document.getElementById("agentText").textContent = "This browser can't speak. Voice Coach is unavailable.";
       return;
     }
-    coach("I'm your coach. I'll talk you through every room.");
+    coach("I'm your coach. I'll talk you through every task.");
   } else {
     try { speechSynthesis.cancel(); } catch (e) {}
   }
@@ -626,6 +756,7 @@ function handleVoice(raw) {
 // Boot
 initState();
 render();
+renderSetup();
 updateTimerDisplay();
 setTimerUI();
 </script>
