@@ -2,11 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0f172a">
-<title>Clean Sweep</title>
-<style>
+<title>Clean Sweep</title><style>
   :root {
     --bg: #0f172a;
     --card: #1e293b;
@@ -22,8 +21,9 @@
     background: var(--bg);
     color: var(--text);
     min-height: 100vh;
-    padding: 16px;
-    padding-bottom: 100px;
+    padding-block: 16px 100px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
   }
   h1 { font-size: 1.6rem; margin-bottom: 4px; }
   .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 20px; }
@@ -37,7 +37,7 @@
   }
   .timer-fill.urgent { background: var(--danger); }
   .timer-display {
-    position: fixed; top: 12px; right: 16px;
+    position: fixed; top: calc(12px + env(safe-area-inset-top, 0px)); right: max(16px, env(safe-area-inset-right, 0px));
     font-size: 1.1rem; font-weight: 700;
     background: var(--card); padding: 6px 12px;
     border-radius: 20px; z-index: 101;
@@ -173,16 +173,7 @@
 
   <button class="btn btn-ghost" style="margin-top:24px" onclick="resetAll()">Reset Everything</button>
 
-  <!-- Camera Overlay -->
-  <div class="camera-overlay" id="cameraOverlay">
-    <video id="video" autoplay playsinline></video>
-    <canvas id="canvas" style="display:none"></canvas>
-    <div class="cam-controls">
-      <button class="btn btn-ghost" onclick="closeCamera()">Cancel</button>
-      <button class="btn btn-primary" onclick="snapPhoto()">Snap</button>
-    </div>
-  </div>
-
+<input type="file" id="picker" accept="image/*" capture="environment" hidden>
 <script>
 const ZONES = [
   "Kitchen", "Bathroom", "Bedroom", "Living Room",
@@ -212,15 +203,16 @@ const SPITE = {
   ]
 };
 
-let state = JSON.parse(localStorage.getItem("cleansweep") || "{}");
+let state = {};
+try { state = JSON.parse(localStorage.getItem("cleansweep") || "{}"); } catch (e) {}
 let currentZone = null;
 let currentType = null; // "before" or "after"
 let timerInterval = null;
 let secondsLeft = 15 * 60;
-let stream = null;
+let resetArmed = false;
 
 function save() {
-  localStorage.setItem("cleansweep", JSON.stringify(state));
+  try { localStorage.setItem("cleansweep", JSON.stringify(state)); } catch (e) {}
 }
 
 function initState() {
@@ -319,58 +311,46 @@ function setRating(zone, n) {
 
 function openCamera(zone, type) {
   if (type === "after" && !state[zone].before) {
-    alert("Take the before photo first.");
+    flash("Take the before photo first.");
     return;
   }
   if (type === "before" && !state[zone].rating) {
-    alert("Rate the dirtiness first (1–5).");
+    flash("Rate the dirtiness first (1–5).");
     return;
   }
   currentZone = zone;
   currentType = type;
-  document.getElementById("cameraOverlay").classList.add("active");
-
-  navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
-    .then(s => {
-      stream = s;
-      document.getElementById("video").srcObject = stream;
-    })
-    .catch(err => {
-      alert("Camera access denied or unavailable.");
-      closeCamera();
-    });
+  const p = document.getElementById("picker");
+  p.value = "";
+  p.click();
 }
 
-function closeCamera() {
-  if (stream) {
-    stream.getTracks().forEach(t => t.stop());
-    stream = null;
-  }
-  document.getElementById("cameraOverlay").classList.remove("active");
-  currentZone = null;
-  currentType = null;
+function flash(msg) {
+  document.getElementById("agentText").textContent = msg;
 }
 
-function snapPhoto() {
-  const video = document.getElementById("video");
-  const canvas = document.getElementById("canvas");
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  canvas.getContext("2d").drawImage(video, 0, 0);
-  const data = canvas.toDataURL("image/jpeg", 0.7);
-
-  state[currentZone][currentType] = data;
-  save();
-  closeCamera();
-  render();
-
-  // Spite reaction after before photo
-  if (currentType === "before") {
-    const line = getSpite(currentZone, state[currentZone].rating);
-    document.getElementById("agentText").textContent =
-      `${currentZone} locked in. ${line}`;
-  }
-}
+document.getElementById("picker").addEventListener("change", e => {
+  const file = e.target.files[0];
+  if (!file || !currentZone) return;
+  const zone = currentZone, type = currentType;
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  img.onload = () => {
+    const max = 800, r = Math.min(1, max / Math.max(img.width, img.height));
+    const c = document.createElement("canvas");
+    c.width = Math.round(img.width * r);
+    c.height = Math.round(img.height * r);
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    URL.revokeObjectURL(url);
+    state[zone][type] = c.toDataURL("image/jpeg", 0.7);
+    save();
+    render();
+    if (type === "before") {
+      flash(`${zone} locked in. ${getSpite(zone, state[zone].rating)}`);
+    }
+  };
+  img.src = url;
+});
 
 function markDone(zone) {
   state[zone].done = true;
@@ -387,7 +367,13 @@ function resetZone(zone) {
 }
 
 function resetAll() {
-  if (!confirm("Wipe all progress and photos?")) return;
+  if (!resetArmed) {
+    resetArmed = true;
+    flash("Tap Reset Everything again to wipe all progress and photos.");
+    setTimeout(() => resetArmed = false, 4000);
+    return;
+  }
+  resetArmed = false;
   state = {};
   initState();
   secondsLeft = 15 * 60;
