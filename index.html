@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0f172a">
+<title>Clean Sweep</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --card: #1e293b;
+    --accent: #38bdf8;
+    --danger: #f87171;
+    --success: #4ade80;
+    --text: #f1f5f9;
+    --muted: #94a3b8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 16px;
+    padding-bottom: 100px;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 20px; }
+  .timer-bar {
+    position: fixed; top: 0; left: 0; right: 0;
+    height: 6px; background: #334155; z-index: 100;
+  }
+  .timer-fill {
+    height: 100%; background: var(--accent);
+    transition: width 1s linear, background 0.3s;
+  }
+  .timer-fill.urgent { background: var(--danger); }
+  .timer-display {
+    position: fixed; top: 12px; right: 16px;
+    font-size: 1.1rem; font-weight: 700;
+    background: var(--card); padding: 6px 12px;
+    border-radius: 20px; z-index: 101;
+  }
+  .timer-display.urgent { color: var(--danger); animation: pulse 0.8s infinite; }
+  @keyframes pulse { 50% { opacity: 0.6; } }
+
+  .zone-list { display: flex; flex-direction: column; gap: 12px; }
+  .zone-card {
+    background: var(--card);
+    border-radius: 16px;
+    padding: 16px;
+    border: 2px solid transparent;
+    transition: border 0.2s;
+  }
+  .zone-card.active { border-color: var(--accent); }
+  .zone-card.done { border-color: var(--success); opacity: 0.75; }
+  .zone-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 12px;
+  }
+  .zone-name { font-weight: 600; font-size: 1.15rem; }
+  .badge {
+    font-size: 0.75rem; padding: 3px 8px; border-radius: 12px;
+    background: #334155; color: var(--muted);
+  }
+  .badge.dirty { background: #7f1d1d; color: #fecaca; }
+  .badge.clean { background: #14532d; color: #bbf7d0; }
+
+  .photos {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+    margin-bottom: 12px;
+  }
+  .photo-box {
+    aspect-ratio: 1; background: #0f172a;
+    border-radius: 12px; overflow: hidden;
+    position: relative; border: 1px dashed #475569;
+  }
+  .photo-box img {
+    width: 100%; height: 100%; object-fit: cover;
+  }
+  .photo-label {
+    position: absolute; bottom: 4px; left: 4px;
+    font-size: 0.7rem; background: rgba(0,0,0,0.7);
+    padding: 2px 6px; border-radius: 6px;
+  }
+  .photo-box.empty::after {
+    content: "Tap to add";
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 0.85rem;
+  }
+
+  .rating {
+    display: flex; gap: 6px; margin: 10px 0;
+    justify-content: center;
+  }
+  .rating button {
+    width: 36px; height: 36px; border-radius: 50%;
+    border: 2px solid #475569; background: transparent;
+    color: var(--text); font-weight: 700; font-size: 0.9rem;
+  }
+  .rating button.selected { background: var(--danger); border-color: var(--danger); }
+
+  .btn {
+    display: block; width: 100%; padding: 12px;
+    border: none; border-radius: 12px;
+    font-size: 1rem; font-weight: 600;
+    cursor: pointer; margin-top: 8px;
+  }
+  .btn-primary { background: var(--accent); color: #0f172a; }
+  .btn-success { background: var(--success); color: #0f172a; }
+  .btn-ghost { background: transparent; color: var(--muted); border: 1px solid #475569; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .agent {
+    background: #1e1b4b;
+    border: 1px solid #4338ca;
+    border-radius: 16px;
+    padding: 16px;
+    margin: 20px 0;
+    font-size: 0.95rem;
+    line-height: 1.45;
+  }
+  .agent strong { color: #a5b4fc; }
+
+  .priority {
+    background: var(--card);
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+  .priority h3 { font-size: 1rem; margin-bottom: 10px; color: var(--accent); }
+  .priority ol { padding-left: 20px; }
+  .priority li { margin: 6px 0; }
+
+  .camera-overlay {
+    position: fixed; inset: 0; background: #000;
+    z-index: 200; display: none; flex-direction: column;
+  }
+  .camera-overlay.active { display: flex; }
+  video, canvas {
+    width: 100%; flex: 1; object-fit: cover;
+  }
+  .cam-controls {
+    padding: 16px; display: flex; gap: 12px; background: #000;
+  }
+  .cam-controls button { flex: 1; }
+
+  .finish-screen {
+    text-align: center; padding: 40px 20px;
+  }
+  .finish-screen h2 { font-size: 1.8rem; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+  <div class="timer-bar"><div class="timer-fill" id="timerFill"></div></div>
+  <div class="timer-display" id="timerDisplay">15:00</div>
+
+  <h1>Clean Sweep</h1>
+  <p class="subtitle">Prove it with photos. No excuses.</p>
+
+  <div class="agent" id="agentBox">
+    <strong>Spite Agent:</strong> <span id="agentText">Take before photos and rate how bad each room is. I'll tell you the order of battle.</span>
+  </div>
+
+  <div class="priority" id="priorityBox" style="display:none">
+    <h3>Attack Order (filthiest first)</h3>
+    <ol id="priorityList"></ol>
+  </div>
+
+  <div class="zone-list" id="zoneList"></div>
+
+  <button class="btn btn-ghost" style="margin-top:24px" onclick="resetAll()">Reset Everything</button>
+
+  <!-- Camera Overlay -->
+  <div class="camera-overlay" id="cameraOverlay">
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas" style="display:none"></canvas>
+    <div class="cam-controls">
+      <button class="btn btn-ghost" onclick="closeCamera()">Cancel</button>
+      <button class="btn btn-primary" onclick="snapPhoto()">Snap</button>
+    </div>
+  </div>
+
+<script>
+const ZONES = [
+  "Kitchen", "Bathroom", "Bedroom", "Living Room",
+  "Dining", "Entryway", "Laundry"
+];
+
+const SPITE = {
+  1: [
+    "Barely dirty. Finish it so you can stop pretending this is hard.",
+    "This is light work. Don't waste my time."
+  ],
+  2: [
+    "Mild chaos. Still not impressive.",
+    "You let it get this far and call yourself an adult?"
+  ],
+  3: [
+    "Respectable mess. Prove you can fix what you broke.",
+    "Average filth. Do better than average."
+  ],
+  4: [
+    "This is bad. Own it and erase it.",
+    "Looking at this should piss you off. Channel it."
+  ],
+  5: [
+    "Absolute disaster. This room has been mocking you.",
+    "How did you let it get this disgusting? Fix it. Now."
+  ]
+};
+
+let state = JSON.parse(localStorage.getItem("cleansweep") || "{}");
+let currentZone = null;
+let currentType = null; // "before" or "after"
+let timerInterval = null;
+let secondsLeft = 15 * 60;
+let stream = null;
+
+function save() {
+  localStorage.setItem("cleansweep", JSON.stringify(state));
+}
+
+function initState() {
+  ZONES.forEach(z => {
+    if (!state[z]) {
+      state[z] = { before: null, after: null, rating: 0, done: false };
+    }
+  });
+  save();
+}
+
+function getSpite(zone, rating) {
+  const lines = SPITE[rating] || SPITE[3];
+  return lines[Math.floor(Math.random() * lines.length)];
+}
+
+function updateAgent() {
+  const rated = ZONES.filter(z => state[z].rating > 0 && !state[z].done);
+  if (rated.length === 0) {
+    document.getElementById("agentText").textContent =
+      "Take before photos and rate how bad each room is. I'll rank them.";
+    document.getElementById("priorityBox").style.display = "none";
+    return;
+  }
+
+  // Sort by rating descending
+  const sorted = [...rated].sort((a, b) => state[b].rating - state[a].rating);
+  const top = sorted[0];
+  const text = `${top} is your worst (rated ${state[top].rating}/5). ${getSpite(top, state[top].rating)} Start there.`;
+  document.getElementById("agentText").textContent = text;
+
+  // Priority list
+  const list = document.getElementById("priorityList");
+  list.innerHTML = sorted.map(z =>
+    `<li><strong>${z}</strong> — ${state[z].rating}/5</li>`
+  ).join("");
+  document.getElementById("priorityBox").style.display = "block";
+}
+
+function render() {
+  const list = document.getElementById("zoneList");
+  list.innerHTML = "";
+
+  ZONES.forEach(zone => {
+    const z = state[zone];
+    const card = document.createElement("div");
+    card.className = "zone-card" + (z.done ? " done" : "");
+    card.id = `card-${zone}`;
+
+    let badge = `<span class="badge">Not started</span>`;
+    if (z.done) badge = `<span class="badge clean">Clean</span>`;
+    else if (z.before) badge = `<span class="badge dirty">Dirty • ${z.rating}/5</span>`;
+
+    card.innerHTML = `
+      <div class="zone-header">
+        <span class="zone-name">${zone}</span>
+        ${badge}
+      </div>
+      <div class="photos">
+        <div class="photo-box ${z.before ? "" : "empty"}" onclick="openCamera('${zone}','before')">
+          ${z.before ? `<img src="${z.before}"><div class="photo-label">BEFORE</div>` : ""}
+        </div>
+        <div class="photo-box ${z.after ? "" : "empty"}" onclick="openCamera('${zone}','after')">
+          ${z.after ? `<img src="${z.after}"><div class="photo-label">AFTER</div>` : ""}
+        </div>
+      </div>
+      ${!z.before ? `
+        <div class="rating" id="rating-${zone}">
+          ${[1,2,3,4,5].map(n =>
+            `<button onclick="setRating('${zone}',${n})" class="${z.rating===n?'selected':''}">${n}</button>`
+          ).join("")}
+        </div>
+        <div style="text-align:center;font-size:0.8rem;color:var(--muted);margin-bottom:8px">
+          Rate dirtiness (1 = light, 5 = disaster)
+        </div>
+      ` : ""}
+      ${z.before && z.after && !z.done ? `
+        <button class="btn btn-success" onclick="markDone('${zone}')">Confirm Clean</button>
+      ` : ""}
+      ${z.done ? `
+        <button class="btn btn-ghost" onclick="resetZone('${zone}')">Reset Zone</button>
+      ` : ""}
+    `;
+    list.appendChild(card);
+  });
+
+  updateAgent();
+  checkAllDone();
+}
+
+function setRating(zone, n) {
+  state[zone].rating = n;
+  save();
+  render();
+}
+
+function openCamera(zone, type) {
+  if (type === "after" && !state[zone].before) {
+    alert("Take the before photo first.");
+    return;
+  }
+  if (type === "before" && !state[zone].rating) {
+    alert("Rate the dirtiness first (1–5).");
+    return;
+  }
+  currentZone = zone;
+  currentType = type;
+  document.getElementById("cameraOverlay").classList.add("active");
+
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
+    .then(s => {
+      stream = s;
+      document.getElementById("video").srcObject = stream;
+    })
+    .catch(err => {
+      alert("Camera access denied or unavailable.");
+      closeCamera();
+    });
+}
+
+function closeCamera() {
+  if (stream) {
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+  }
+  document.getElementById("cameraOverlay").classList.remove("active");
+  currentZone = null;
+  currentType = null;
+}
+
+function snapPhoto() {
+  const video = document.getElementById("video");
+  const canvas = document.getElementById("canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0);
+  const data = canvas.toDataURL("image/jpeg", 0.7);
+
+  state[currentZone][currentType] = data;
+  save();
+  closeCamera();
+  render();
+
+  // Spite reaction after before photo
+  if (currentType === "before") {
+    const line = getSpite(currentZone, state[currentZone].rating);
+    document.getElementById("agentText").textContent =
+      `${currentZone} locked in. ${line}`;
+  }
+}
+
+function markDone(zone) {
+  state[zone].done = true;
+  save();
+  render();
+  document.getElementById("agentText").textContent =
+    `${zone} is down. Keep going. No victory laps yet.`;
+}
+
+function resetZone(zone) {
+  state[zone] = { before: null, after: null, rating: 0, done: false };
+  save();
+  render();
+}
+
+function resetAll() {
+  if (!confirm("Wipe all progress and photos?")) return;
+  state = {};
+  initState();
+  secondsLeft = 15 * 60;
+  updateTimerDisplay();
+  render();
+}
+
+function checkAllDone() {
+  const allDone = ZONES.every(z => state[z].done);
+  if (allDone) {
+    document.getElementById("agentText").textContent =
+      "Everything is clean. You actually did it. Don't let it rot again.";
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+    }
+  }
+}
+
+function updateTimerDisplay() {
+  const m = Math.floor(secondsLeft / 60).toString().padStart(2, "0");
+  const s = (secondsLeft % 60).toString().padStart(2, "0");
+  const display = document.getElementById("timerDisplay");
+  const fill = document.getElementById("timerFill");
+  display.textContent = `${m}:${s}`;
+  fill.style.width = `${(secondsLeft / (15 * 60)) * 100}%`;
+
+  if (secondsLeft <= 60) {
+    display.classList.add("urgent");
+    fill.classList.add("urgent");
+  } else {
+    display.classList.remove("urgent");
+    fill.classList.remove("urgent");
+  }
+}
+
+function startTimer() {
+  if (timerInterval) return;
+  timerInterval = setInterval(() => {
+    secondsLeft--;
+    updateTimerDisplay();
+    if (secondsLeft <= 0) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+      // Vibration alarm
+      if (navigator.vibrate) navigator.vibrate([300, 100, 300, 100, 500]);
+      const undone = ZONES.filter(z => !state[z].done).length;
+      document.getElementById("agentText").textContent =
+        undone === 0
+          ? "Timer hit zero but you finished. Fine. Acceptable."
+          : `Time's up. You left ${undone} zone${undone > 1 ? "s" : ""} unfinished. Weak.`;
+    }
+    // Mid-session taunts
+    if (secondsLeft === 5 * 60 || secondsLeft === 2 * 60) {
+      const remaining = ZONES.filter(z => !state[z].done);
+      if (remaining.length) {
+        document.getElementById("agentText").textContent =
+          `${remaining.length} zones left and the clock is bleeding. Move.`;
+      }
+    }
+  }, 1000);
+}
+
+// Boot
+initState();
+render();
+updateTimerDisplay();
+startTimer();
+</script>
+</body>
+</html>
