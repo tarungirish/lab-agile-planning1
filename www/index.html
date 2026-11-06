@@ -366,6 +366,7 @@ document.getElementById("picker").addEventListener("change", e => {
 });
 
 function markDone(zone) {
+  buzz("LIGHT");
   state[zone].done = true;
   save();
   render();
@@ -442,10 +443,13 @@ function toggleTimer() {
   if (timerInterval) { stopTimer(); if (coachOn) say("Paused. Say start when you're ready."); return; }
   if (secondsLeft <= 0) return;
   startTimer();
+  buzz("MEDIUM");
+  scheduleEndAlert();
   if (coachOn) coach("Clock is running. Fifteen minutes. Go.");
 }
 
 function stopTimer() {
+  cancelEndAlert();
   clearInterval(timerInterval);
   timerInterval = null;
   setTimerUI();
@@ -453,13 +457,15 @@ function stopTimer() {
 
 function startTimer() {
   if (timerInterval) return;
+  const endAt = Date.now() + secondsLeft * 1000;
   timerInterval = setInterval(() => {
-    secondsLeft--;
+    secondsLeft = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
     updateTimerDisplay();
     if (secondsLeft <= 0) {
       stopTimer();
       // Vibration alarm
       if (navigator.vibrate) navigator.vibrate([300, 100, 300, 100, 500]);
+      buzz("HEAVY");
       const undone = ZONES.filter(z => !state[z].done).length;
       say(undone === 0
         ? "Timer hit zero but you finished. Fine. Acceptable."
@@ -476,6 +482,38 @@ function startTimer() {
   setTimerUI();
 }
 
+
+
+// ---------- Native extras (only inside the iOS app) ----------
+const Native = (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform())
+  ? window.Capacitor.Plugins : null;
+
+function buzz(style) {
+  try { if (Native && Native.Haptics) Native.Haptics.impact({ style: style || "MEDIUM" }); } catch (e) {}
+}
+
+async function scheduleEndAlert() {
+  if (!Native || !Native.LocalNotifications) return;
+  try {
+    const perm = await Native.LocalNotifications.requestPermissions();
+    if (perm.display !== "granted") return;
+    await Native.LocalNotifications.cancel({ notifications: [{ id: 1 }] });
+    await Native.LocalNotifications.schedule({ notifications: [{
+      id: 1,
+      title: "Clean Sweep",
+      body: "Time's up. Check what you left unfinished.",
+      schedule: { at: new Date(Date.now() + secondsLeft * 1000) }
+    }] });
+  } catch (e) {}
+}
+
+function cancelEndAlert() {
+  try {
+    if (Native && Native.LocalNotifications)
+      Native.LocalNotifications.cancel({ notifications: [{ id: 1 }] });
+  } catch (e) {}
+}
+// -------------------------------------------------------------
 
 // ---------- Voice coach ----------
 let coachOn = false;

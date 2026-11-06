@@ -1,0 +1,6 @@
+{
+  "appId": "com.example.cleansweep",
+  "appName": "Clean Sweep",
+  "webDir": "www",
+  "ios": { "contentInset": "always" }
+}

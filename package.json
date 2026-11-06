@@ -1,0 +1,17 @@
+{
+  "name": "clean-sweep",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Clean Sweep: a 15-minute room-by-room cleaning timer with before and after photos.",
+  "scripts": {
+    "sync": "cap sync",
+    "ios": "cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/cli": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/ios": "^8.6.0",
+    "@capacitor/local-notifications": "^8.3.1"
+  }
+}
