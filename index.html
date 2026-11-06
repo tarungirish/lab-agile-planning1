@@ -42,6 +42,8 @@
     background: var(--card); padding: 6px 12px;
     border-radius: 20px; z-index: 101;
   }
+  button.timer-display { border: none; color: var(--text); font-family: inherit; cursor: pointer; }
+  button.timer-display.running { box-shadow: 0 0 0 2px var(--accent); }
   .timer-display.urgent { color: var(--danger); animation: pulse 0.8s infinite; }
   @keyframes pulse { 50% { opacity: 0.6; } }
 
@@ -155,10 +157,12 @@
 </head>
 <body>
   <div class="timer-bar"><div class="timer-fill" id="timerFill"></div></div>
-  <div class="timer-display" id="timerDisplay">15:00</div>
+  <button type="button" class="timer-display" id="timerDisplay" onclick="toggleTimer()" aria-label="Start or pause timer">15:00</button>
 
   <h1>Clean Sweep</h1>
   <p class="subtitle">Prove it with photos. No excuses.</p>
+
+  <button type="button" class="btn btn-primary" id="timerBtn" onclick="toggleTimer()">Start Sweep</button>
 
   <div class="agent" id="agentBox">
     <strong>Spite Agent:</strong> <span id="agentText">Take before photos and rate how bad each room is. I'll tell you the order of battle.</span>
@@ -376,8 +380,10 @@ function resetAll() {
   resetArmed = false;
   state = {};
   initState();
+  stopTimer();
   secondsLeft = 15 * 60;
   updateTimerDisplay();
+  setTimerUI();
   render();
 }
 
@@ -386,10 +392,7 @@ function checkAllDone() {
   if (allDone) {
     document.getElementById("agentText").textContent =
       "Everything is clean. You actually did it. Don't let it rot again.";
-    if (timerInterval) {
-      clearInterval(timerInterval);
-      timerInterval = null;
-    }
+    if (timerInterval) stopTimer();
   }
 }
 
@@ -410,14 +413,35 @@ function updateTimerDisplay() {
   }
 }
 
+function setTimerUI() {
+  const running = !!timerInterval;
+  const done = secondsLeft <= 0;
+  const untouched = secondsLeft === 15 * 60;
+  const btn = document.getElementById("timerBtn");
+  btn.textContent = done ? "Time's up" : running ? "Pause" : untouched ? "Start Sweep" : "Resume";
+  btn.disabled = done;
+  document.getElementById("timerDisplay").classList.toggle("running", running);
+}
+
+function toggleTimer() {
+  if (timerInterval) { stopTimer(); return; }
+  if (secondsLeft <= 0) return;
+  startTimer();
+}
+
+function stopTimer() {
+  clearInterval(timerInterval);
+  timerInterval = null;
+  setTimerUI();
+}
+
 function startTimer() {
   if (timerInterval) return;
   timerInterval = setInterval(() => {
     secondsLeft--;
     updateTimerDisplay();
     if (secondsLeft <= 0) {
-      clearInterval(timerInterval);
-      timerInterval = null;
+      stopTimer();
       // Vibration alarm
       if (navigator.vibrate) navigator.vibrate([300, 100, 300, 100, 500]);
       const undone = ZONES.filter(z => !state[z].done).length;
@@ -435,13 +459,14 @@ function startTimer() {
       }
     }
   }, 1000);
+  setTimerUI();
 }
 
 // Boot
 initState();
 render();
 updateTimerDisplay();
-startTimer();
+setTimerUI();
 </script>
 </body>
 </html>
