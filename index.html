@@ -164,6 +164,11 @@
 
   <button type="button" class="btn btn-primary" id="timerBtn" onclick="toggleTimer()">Start Sweep</button>
 
+  <div style="display:flex;gap:10px;margin-top:10px">
+    <button type="button" class="btn btn-ghost" id="coachBtn" style="margin-top:0" onclick="toggleCoach()">Voice Coach: Off</button>
+    <button type="button" class="btn btn-ghost" id="talkBtn" style="margin-top:0" onclick="listen()" hidden>Talk</button>
+  </div>
+
   <div class="agent" id="agentBox">
     <strong>Spite Agent:</strong> <span id="agentText">Take before photos and rate how bad each room is. I'll tell you the order of battle.</span>
   </div>
@@ -214,6 +219,7 @@ let currentType = null; // "before" or "after"
 let timerInterval = null;
 let secondsLeft = 15 * 60;
 let resetArmed = false;
+let allDoneSpoken = false;
 
 function save() {
   try { localStorage.setItem("cleansweep", JSON.stringify(state)); } catch (e) {}
@@ -311,6 +317,7 @@ function setRating(zone, n) {
   state[zone].rating = n;
   save();
   render();
+  if (coachOn) coach(`${zone} rated ${n}.`);
 }
 
 function openCamera(zone, type) {
@@ -330,7 +337,7 @@ function openCamera(zone, type) {
 }
 
 function flash(msg) {
-  document.getElementById("agentText").textContent = msg;
+  say(msg);
 }
 
 document.getElementById("picker").addEventListener("change", e => {
@@ -350,7 +357,9 @@ document.getElementById("picker").addEventListener("change", e => {
     save();
     render();
     if (type === "before") {
-      flash(`${zone} locked in. ${getSpite(zone, state[zone].rating)}`);
+      react(`${zone} locked in. ${getSpite(zone, state[zone].rating)}`);
+    } else if (coachOn) {
+      coach(`${zone} after photo is in.`);
     }
   };
   img.src = url;
@@ -360,8 +369,7 @@ function markDone(zone) {
   state[zone].done = true;
   save();
   render();
-  document.getElementById("agentText").textContent =
-    `${zone} is down. Keep going. No victory laps yet.`;
+  react(`${zone} is down. Keep going. No victory laps yet.`);
 }
 
 function resetZone(zone) {
@@ -390,9 +398,16 @@ function resetAll() {
 function checkAllDone() {
   const allDone = ZONES.every(z => state[z].done);
   if (allDone) {
-    document.getElementById("agentText").textContent =
-      "Everything is clean. You actually did it. Don't let it rot again.";
+    if (!allDoneSpoken) {
+      allDoneSpoken = true;
+      say("Everything is clean. You actually did it. Don't let it rot again.");
+    } else {
+      document.getElementById("agentText").textContent =
+        "Everything is clean. You actually did it. Don't let it rot again.";
+    }
     if (timerInterval) stopTimer();
+  } else {
+    allDoneSpoken = false;
   }
 }
 
@@ -424,9 +439,10 @@ function setTimerUI() {
 }
 
 function toggleTimer() {
-  if (timerInterval) { stopTimer(); return; }
+  if (timerInterval) { stopTimer(); if (coachOn) say("Paused. Say start when you're ready."); return; }
   if (secondsLeft <= 0) return;
   startTimer();
+  if (coachOn) coach("Clock is running. Fifteen minutes. Go.");
 }
 
 function stopTimer() {
@@ -445,22 +461,129 @@ function startTimer() {
       // Vibration alarm
       if (navigator.vibrate) navigator.vibrate([300, 100, 300, 100, 500]);
       const undone = ZONES.filter(z => !state[z].done).length;
-      document.getElementById("agentText").textContent =
-        undone === 0
-          ? "Timer hit zero but you finished. Fine. Acceptable."
-          : `Time's up. You left ${undone} zone${undone > 1 ? "s" : ""} unfinished. Weak.`;
+      say(undone === 0
+        ? "Timer hit zero but you finished. Fine. Acceptable."
+        : `Time's up. You left ${undone} zone${undone > 1 ? "s" : ""} unfinished. Weak.`);
     }
     // Mid-session taunts
     if (secondsLeft === 5 * 60 || secondsLeft === 2 * 60) {
       const remaining = ZONES.filter(z => !state[z].done);
       if (remaining.length) {
-        document.getElementById("agentText").textContent =
-          `${remaining.length} zones left and the clock is bleeding. Move.`;
+        react(`${remaining.length} zones left and the clock is bleeding. Move.`);
       }
     }
   }, 1000);
   setTimerUI();
 }
+
+
+// ---------- Voice coach ----------
+let coachOn = false;
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const NUMS = { one: 1, two: 2, three: 3, four: 4, five: 5, "1": 1, "2": 2, "3": 3, "4": 4, "5": 5 };
+
+function speak(text) {
+  if (!coachOn || !("speechSynthesis" in window)) return;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.05;
+    speechSynthesis.speak(u);
+  } catch (e) {}
+}
+
+function say(text) {
+  document.getElementById("agentText").textContent = text;
+  speak(text);
+}
+
+function nextStep() {
+  const open = ZONES.filter(z => !state[z].done);
+  if (!open.length) return "";
+  const ready = open.find(z => state[z].before && state[z].after);
+  if (ready) return `Confirm ${ready} is clean.`;
+  const working = open.find(z => state[z].before && !state[z].after);
+  if (working) return `Clean ${working}, then take the after photo.`;
+  const rated = open.filter(z => state[z].rating > 0)
+    .sort((a, b) => state[b].rating - state[a].rating);
+  const started = secondsLeft < 15 * 60;
+  if (rated.length) {
+    const tip = started || timerInterval ? "" : " Say start when you're ready.";
+    return `Take the before photo of ${rated[0]}, your worst room.${tip}`;
+  }
+  return `Rate ${open[0]} from one to five. You can say, rate ${open[0].toLowerCase()} four.`;
+}
+
+function coach(lead) {
+  say([lead, nextStep()].filter(Boolean).join(" "));
+}
+
+function react(lead) {
+  if (coachOn) coach(lead); else say(lead);
+}
+
+function toggleCoach() {
+  coachOn = !coachOn;
+  const btn = document.getElementById("coachBtn");
+  btn.textContent = coachOn ? "Voice Coach: On" : "Voice Coach: Off";
+  btn.classList.toggle("btn-primary", coachOn);
+  btn.classList.toggle("btn-ghost", !coachOn);
+  document.getElementById("talkBtn").hidden = !(coachOn && SR);
+  if (coachOn) {
+    if (!("speechSynthesis" in window)) {
+      coachOn = false;
+      btn.textContent = "Voice Coach: Off";
+      document.getElementById("agentText").textContent = "This browser can't speak. Voice Coach is unavailable.";
+      return;
+    }
+    coach("I'm your coach. I'll talk you through every room.");
+  } else {
+    try { speechSynthesis.cancel(); } catch (e) {}
+  }
+}
+
+function listen() {
+  if (!SR) return;
+  try { speechSynthesis.cancel(); } catch (e) {}
+  const talk = document.getElementById("talkBtn");
+  const rec = new SR();
+  rec.lang = "en-US";
+  rec.onstart = () => { talk.textContent = "Listening…"; };
+  rec.onend = () => { talk.textContent = "Talk"; };
+  rec.onerror = ev => {
+    if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
+      talk.hidden = true;
+      say("I can't use your microphone here. Use the buttons and I'll keep talking.");
+    } else if (ev.error !== "aborted") {
+      say("I didn't catch that. Try again.");
+    }
+  };
+  rec.onresult = ev => handleVoice(ev.results[0][0].transcript);
+  try { rec.start(); } catch (e) {}
+}
+
+function handleVoice(raw) {
+  const t = raw.toLowerCase();
+  const room = ZONES.find(z => t.includes(z.toLowerCase()));
+  const num = t.split(/[^a-z0-9]+/).map(w => NUMS[w]).find(Boolean);
+  if (/\b(next|what now|what's next|whats next)\b/.test(t)) return coach("");
+  if (/\b(pause|stop|hold)\b/.test(t)) {
+    if (timerInterval) toggleTimer(); else say("The clock isn't running.");
+    return;
+  }
+  if (/\b(start|begin|go)\b/.test(t) && !room) {
+    if (!timerInterval && secondsLeft > 0) toggleTimer(); else say("The clock is already running.");
+    return;
+  }
+  if (room && num && /rate|rating|is a|is an|dirt/.test(t) && !state[room].before) return setRating(room, num);
+  if (room && /done|clean|finished/.test(t)) {
+    const z = state[room];
+    if (z.before && z.after && !z.done) return markDone(room);
+    return say(`${room} needs a before and an after photo first.`);
+  }
+  say(`I heard, ${raw}. Try: rate kitchen four, start, pause, or what's next.`);
+}
+// ---------------------------------
 
 // Boot
 initState();
